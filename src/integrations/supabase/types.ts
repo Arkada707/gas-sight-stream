@@ -14,7 +14,54 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      sensor_data: {
+        Row: {
+          id: string
+          device_id: string
+          title_name: string
+          tank_level: number
+          tank_level_unit: string
+          updated_refresh: string
+          battery: "Full" | "Ok" | "Low"
+          connection_strength: number
+          measurement: number
+          measurement_unit: string
+          technical_data: Json | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          device_id: string
+          title_name: string
+          tank_level: number
+          tank_level_unit?: string
+          updated_refresh: string
+          battery: "Full" | "Ok" | "Low"
+          connection_strength: number
+          measurement: number
+          measurement_unit?: string
+          technical_data?: Json | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          device_id?: string
+          title_name?: string
+          tank_level?: number
+          tank_level_unit?: string
+          updated_refresh?: string
+          battery?: "Full" | "Ok" | "Low"
+          connection_strength?: number
+          measurement?: number
+          measurement_unit?: string
+          technical_data?: Json | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

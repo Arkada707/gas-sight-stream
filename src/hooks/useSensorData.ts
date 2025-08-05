@@ -1,4 +1,6 @@
 import { useState, useEffect } from "react";
+import { supabase } from "@/integrations/supabase/client";
+import type { Database } from "@/integrations/supabase/types";
 
 export interface SensorData {
   id: string;
@@ -28,17 +30,32 @@ export interface TechnicalData {
   };
 }
 
-// Simulated real-time data for demonstration
+type SensorDataRow = Database['public']['Tables']['sensor_data']['Row'];
+
+// Transform Supabase data to component format
+const transformSupabaseData = (data: SensorDataRow): SensorData => {
+  return {
+    id: data.device_id,
+    titlename: data.title_name,
+    tanklevel: `${data.tank_level} ${data.tank_level_unit}`,
+    updatedrefresh: data.updated_refresh,
+    battery: data.battery,
+    connection: `${data.connection_strength}%`,
+    measurement: `${data.measurement}${data.measurement_unit}`
+  };
+};
+
+// Fallback mock data for when no real data is available
 const generateMockData = (): SensorData => {
   const gasLevel = Math.random() * 100;
-  const tankLevel = 60 - (gasLevel * 0.4); // Inverse relationship
+  const tankLevel = 60 - (gasLevel * 0.4);
   const batteryLevels: ("Full" | "Ok" | "Low")[] = ["Full", "Ok", "Low"];
   const battery = batteryLevels[Math.floor(Math.random() * batteryLevels.length)];
   const connection = Math.floor(70 + Math.random() * 30);
 
   return {
     id: "C5BAA016-CF65-B806-4E06-0F13B8592C7A",
-    titlename: "Gas LPG 15kg Production Tank",
+    titlename: "Gas LPG 15kg Production Tank (Mock Data)",
     tanklevel: `${tankLevel.toFixed(1)} cm`,
     updatedrefresh: "just now",
     battery,
@@ -49,25 +66,83 @@ const generateMockData = (): SensorData => {
 
 export function useSensorData() {
   const [sensorData, setSensorData] = useState<SensorData>(generateMockData());
-  const [isConnected, setIsConnected] = useState(true);
+  const [isConnected, setIsConnected] = useState(false);
   const [lastUpdate, setLastUpdate] = useState(new Date());
+  const [isUsingRealData, setIsUsingRealData] = useState(false);
 
   useEffect(() => {
-    // Simulate real-time updates every 3 seconds
-    const interval = setInterval(() => {
-      setSensorData(generateMockData());
-      setLastUpdate(new Date());
-      
-      // Simulate occasional connection issues
-      setIsConnected(Math.random() > 0.1);
-    }, 3000);
+    // Function to fetch latest sensor data
+    const fetchLatestData = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('sensor_data')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single();
 
-    return () => clearInterval(interval);
-  }, []);
+        if (error) {
+          console.error('Error fetching sensor data:', error);
+          if (!isUsingRealData) {
+            // Fall back to mock data if we haven't received real data yet
+            setSensorData(generateMockData());
+          }
+          setIsConnected(false);
+          return;
+        }
+
+        if (data) {
+          const transformedData = transformSupabaseData(data);
+          setSensorData(transformedData);
+          setLastUpdate(new Date(data.updated_at));
+          setIsConnected(true);
+          setIsUsingRealData(true);
+        }
+      } catch (err) {
+        console.error('Error in fetchLatestData:', err);
+        setIsConnected(false);
+      }
+    };
+
+    // Initial fetch
+    fetchLatestData();
+
+    // Set up real-time subscription
+    const subscription = supabase
+      .channel('sensor_data_changes')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'sensor_data'
+        },
+        (payload) => {
+          console.log('New sensor data received:', payload);
+          if (payload.new) {
+            const transformedData = transformSupabaseData(payload.new as SensorDataRow);
+            setSensorData(transformedData);
+            setLastUpdate(new Date(payload.new.updated_at as string));
+            setIsConnected(true);
+            setIsUsingRealData(true);
+          }
+        }
+      )
+      .subscribe();
+
+    // Fallback polling for cases where real-time doesn't work
+    const pollInterval = setInterval(fetchLatestData, 5000);
+
+    // Cleanup function
+    return () => {
+      subscription.unsubscribe();
+      clearInterval(pollInterval);
+    };
+  }, [isUsingRealData]);
 
   const parsedData = {
     gasLevel: parseFloat(sensorData.measurement.replace('%', '')),
-    tankLevel: parseFloat(sensorData.tanklevel.replace(' cm', '')),
+    tankLevel: parseFloat(sensorData.tanklevel.replace(/[^\d.]/g, '')),
     connectionQuality: parseInt(sensorData.connection.replace('%', '')),
     batteryStatus: sensorData.battery,
     deviceName: sensorData.titlename,
@@ -78,6 +153,7 @@ export function useSensorData() {
     sensorData,
     parsedData,
     isConnected,
-    lastUpdate
+    lastUpdate,
+    isUsingRealData
   };
 }
