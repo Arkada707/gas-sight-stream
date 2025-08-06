@@ -32,7 +32,7 @@ export interface Device {
     tankLevelUnit: string;
     measurement: number;
     measurementUnit: string;
-    battery: "Full" | "Ok" | "Low";
+    battery: string;
     connectionStrength: number;
     lastUpdated: string;
   };

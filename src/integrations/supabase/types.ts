@@ -16,151 +16,147 @@ export type Database = {
     Tables: {
       devices: {
         Row: {
-          id: string
-          name: string
-          mac_address: string
-          title: string
-          location: string
-          service_uuid: string
+          color: string
+          confidence_score: number | null
+          connection_attempts: number
+          created_at: string
           data_characteristic_uuid: string
           enabled: boolean
-          color: string
-          rssi: number | null
-          confidence_score: number | null
-          last_discovered: string | null
-          discovery_metadata: Json | null
+          id: string
           is_connected: boolean
           last_connected: string | null
-          connection_attempts: number
+          last_discovered: string | null
+          location: string
+          mac_address: string
+          name: string
+          rssi: number | null
+          service_uuid: string
+          title: string
           total_packets_received: number
-          created_at: string
           updated_at: string
         }
         Insert: {
-          id: string
-          name: string
-          mac_address: string
-          title: string
-          location?: string
-          service_uuid?: string
-          data_characteristic_uuid?: string
-          enabled?: boolean
           color?: string
-          rssi?: number | null
           confidence_score?: number | null
-          last_discovered?: string | null
-          discovery_metadata?: Json | null
+          connection_attempts?: number
+          created_at?: string
+          data_characteristic_uuid: string
+          enabled?: boolean
+          id: string
           is_connected?: boolean
           last_connected?: string | null
-          connection_attempts?: number
+          last_discovered?: string | null
+          location?: string
+          mac_address: string
+          name: string
+          rssi?: number | null
+          service_uuid: string
+          title: string
           total_packets_received?: number
-          created_at?: string
           updated_at?: string
         }
         Update: {
-          id?: string
-          name?: string
-          mac_address?: string
-          title?: string
-          location?: string
-          service_uuid?: string
+          color?: string
+          confidence_score?: number | null
+          connection_attempts?: number
+          created_at?: string
           data_characteristic_uuid?: string
           enabled?: boolean
-          color?: string
-          rssi?: number | null
-          confidence_score?: number | null
-          last_discovered?: string | null
-          discovery_metadata?: Json | null
+          id?: string
           is_connected?: boolean
           last_connected?: string | null
-          connection_attempts?: number
+          last_discovered?: string | null
+          location?: string
+          mac_address?: string
+          name?: string
+          rssi?: number | null
+          service_uuid?: string
+          title?: string
           total_packets_received?: number
-          created_at?: string
           updated_at?: string
         }
         Relationships: []
       }
       sensor_data: {
         Row: {
-          id: string
-          device_id: string
-          title_name: string
-          tank_level: number
-          tank_level_unit: string
-          updated_refresh: string
-          battery: "Full" | "Ok" | "Low"
+          battery: string
           connection_strength: number
-          measurement: number
-          measurement_unit: string
-          technical_data: Json | null
           created_at: string
+          device_id: string
+          id: string
+          measurement: number
+          measurement_unit: string | null
+          tank_level: number
+          tank_level_unit: string | null
+          technical_data: Json | null
+          title_name: string
           updated_at: string
+          updated_refresh: string
         }
         Insert: {
-          id?: string
-          device_id: string
-          title_name: string
-          tank_level: number
-          tank_level_unit?: string
-          updated_refresh: string
-          battery: "Full" | "Ok" | "Low"
+          battery: string
           connection_strength: number
-          measurement: number
-          measurement_unit?: string
-          technical_data?: Json | null
           created_at?: string
+          device_id: string
+          id?: string
+          measurement: number
+          measurement_unit?: string | null
+          tank_level: number
+          tank_level_unit?: string | null
+          technical_data?: Json | null
+          title_name: string
           updated_at?: string
+          updated_refresh: string
         }
         Update: {
-          id?: string
-          device_id?: string
-          title_name?: string
-          tank_level?: number
-          tank_level_unit?: string
-          updated_refresh?: string
-          battery?: "Full" | "Ok" | "Low"
+          battery?: string
           connection_strength?: number
-          measurement?: number
-          measurement_unit?: string
-          technical_data?: Json | null
           created_at?: string
+          device_id?: string
+          id?: string
+          measurement?: number
+          measurement_unit?: string | null
+          tank_level?: number
+          tank_level_unit?: string | null
+          technical_data?: Json | null
+          title_name?: string
           updated_at?: string
+          updated_refresh?: string
         }
-        Relationships: [
-          {
-            foreignKeyName: "fk_sensor_data_device_id"
-            columns: ["device_id"]
-            isOneToOne: false
-            referencedRelation: "devices"
-            referencedColumns: ["id"]
-          }
-        ]
+        Relationships: []
       }
     }
     Views: {
       device_stats: {
         Row: {
-          id: string
-          name: string
-          title: string
-          location: string
-          color: string
-          enabled: boolean
-          is_connected: boolean
-          last_connected: string | null
-          total_packets_received: number
-          device_created_at: string
-          latest_tank_level: number | null
-          tank_level_unit: string | null
-          latest_measurement: number | null
-          measurement_unit: string | null
-          latest_battery: "Full" | "Ok" | "Low" | null
-          latest_connection_strength: number | null
-          latest_refresh: string | null
-          latest_reading_at: string | null
-          total_readings: number | null
-          readings_last_24h: number | null
           avg_measurement_24h: number | null
+          color: string | null
+          confidence_score: number | null
+          connection_attempts: number | null
+          data_characteristic_uuid: string | null
+          device_created_at: string | null
+          device_updated_at: string | null
+          enabled: boolean | null
+          id: string | null
+          is_connected: boolean | null
+          last_connected: string | null
+          last_discovered: string | null
+          latest_battery: string | null
+          latest_connection_strength: number | null
+          latest_measurement: number | null
+          latest_reading_at: string | null
+          latest_tank_level: number | null
+          location: string | null
+          mac_address: string | null
+          measurement_unit: string | null
+          name: string | null
+          readings_last_24h: number | null
+          rssi: number | null
+          service_uuid: string | null
+          tank_level_unit: string | null
+          title: string | null
+          total_packets_received: number | null
+          total_readings: number | null
         }
         Relationships: []
       }

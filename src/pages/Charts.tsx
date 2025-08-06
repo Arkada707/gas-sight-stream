@@ -7,7 +7,7 @@ import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { format, subHours, subDays, subWeeks, parseISO } from 'date-fns';
+import { format as formatDate, subHours, subDays, subWeeks, parseISO } from 'date-fns';
 import { TrendingUp, Download, Calendar, Palette, Layers } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import Navigation from "@/components/Navigation";
@@ -18,7 +18,7 @@ interface SensorDataPoint {
   title_name: string;
   tank_level: number;
   measurement: number;
-  battery: "Full" | "Ok" | "Low";
+  battery: string;
   connection_strength: number;
   created_at: string;
 }
@@ -72,7 +72,8 @@ const Charts = () => {
       } else if (range === "1m") {
         startDate = subDays(now, 30);
       } else {
-        const hours = timeRanges[range as keyof typeof timeRanges]?.hours || 24;
+        const rangeData = timeRanges[range as keyof typeof timeRanges];
+        const hours = 'hours' in rangeData ? rangeData.hours : 24;
         startDate = subHours(now, hours);
       }
 
@@ -94,7 +95,7 @@ const Charts = () => {
         return;
       }
 
-      setHistoricalData(data || []);
+      setHistoricalData((data || []) as SensorDataPoint[]);
     } catch (error) {
       console.error('Error:', error);
     } finally {
@@ -111,7 +112,7 @@ const Charts = () => {
       // Single device mode
       return data.map(point => ({
         timestamp: parseISO(point.created_at),
-        time: format(parseISO(point.created_at), selectedRange === "1m" ? "MMM dd" : selectedRange === "1w" ? "MMM dd HH:mm" : "HH:mm"),
+        time: formatDate(parseISO(point.created_at), selectedRange === "1m" ? "MMM dd" : selectedRange === "1w" ? "MMM dd HH:mm" : "HH:mm"),
         gasLevel: point.measurement,
         tankLevel: point.tank_level,
         connectionQuality: point.connection_strength,
@@ -135,7 +136,7 @@ const Charts = () => {
       Object.entries(timeGroups).forEach(([timestamp, points]) => {
         const chartPoint: ChartDataPoint = {
           timestamp: parseISO(timestamp),
-          time: format(parseISO(timestamp), selectedRange === "1m" ? "MMM dd" : selectedRange === "1w" ? "MMM dd HH:mm" : "HH:mm"),
+          time: formatDate(parseISO(timestamp), selectedRange === "1m" ? "MMM dd" : selectedRange === "1w" ? "MMM dd HH:mm" : "HH:mm"),
           raw_timestamp: timestamp
         };
 
@@ -172,7 +173,7 @@ const Charts = () => {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `sensor_data_${chartMode}_${selectedRange}_${format(new Date(), 'yyyy-MM-dd')}.json`;
+      a.download = `sensor_data_${chartMode}_${selectedRange}_${formatDate(new Date(), 'yyyy-MM-dd')}.json`;
       a.click();
       URL.revokeObjectURL(url);
     } else if (format === 'csv') {
@@ -186,7 +187,7 @@ const Charts = () => {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `sensor_data_${chartMode}_${selectedRange}_${format(new Date(), 'yyyy-MM-dd')}.csv`;
+      a.download = `sensor_data_${chartMode}_${selectedRange}_${formatDate(new Date(), 'yyyy-MM-dd')}.csv`;
       a.click();
       URL.revokeObjectURL(url);
     }
@@ -206,7 +207,7 @@ const Charts = () => {
       if (chartMode === 'single') {
         return (
           <div className="bg-background border border-border rounded-lg p-3 shadow-lg">
-            <p className="font-semibold">{format(data.timestamp, 'PPpp')}</p>
+            <p className="font-semibold">{formatDate(data.timestamp, 'PPpp')}</p>
             {payload.map((entry: any, index: number) => (
               <p key={index} style={{ color: entry.color }}>
                 {entry.name}: {entry.value.toFixed(1)}{entry.name === 'Gas Level' || entry.name === 'Connection Quality' || entry.name === 'Battery Level' ? '%' : entry.name === 'Tank Level' ? ' cm' : ''}
@@ -219,7 +220,7 @@ const Charts = () => {
         
         return (
           <div className="bg-background border border-border rounded-lg p-3 shadow-lg max-w-xs">
-            <p className="font-semibold mb-2">{format(data.timestamp, 'PPpp')}</p>
+            <p className="font-semibold mb-2">{formatDate(data.timestamp, 'PPpp')}</p>
             {visibleDevices.map(device => {
               const gasLevel = data[`${device.id}_gasLevel`];
               const tankLevel = data[`${device.id}_tankLevel`];

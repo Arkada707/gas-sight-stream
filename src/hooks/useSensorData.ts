@@ -7,7 +7,7 @@ export interface SensorData {
   titlename: string;
   tanklevel: string;
   updatedrefresh: string;
-  battery: "Full" | "Ok" | "Low";
+  battery: string;
   connection: string;
   measurement: string;
 }
