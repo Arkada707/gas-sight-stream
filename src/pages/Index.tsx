@@ -1,4 +1,5 @@
 import { useSensorData } from "@/hooks/useSensorData";
+import { useDeviceData } from "@/hooks/useDeviceData";
 import { DeviceHeader } from "@/components/dashboard/DeviceHeader";
 import { CircularGauge } from "@/components/dashboard/CircularGauge";
 import { StatusCard } from "@/components/dashboard/StatusCard";
@@ -8,9 +9,11 @@ import { LinearGauge } from "@/components/dashboard/LinearGauge";
 import { AlertPanel } from "@/components/dashboard/AlertPanel";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Fuel, Gauge, Thermometer, Clock } from "lucide-react";
+import Navigation from "@/components/Navigation";
 
 const Index = () => {
-  const { parsedData, isConnected, lastUpdate } = useSensorData();
+  const { selectedDeviceId, selectedDevice } = useDeviceData();
+  const { parsedData, isConnected, lastUpdate } = useSensorData(selectedDeviceId || undefined);
 
   const getGasLevelColor = (level: number) => {
     if (level > 50) return "success";
@@ -21,6 +24,9 @@ const Index = () => {
   return (
     <div className="min-h-screen bg-background">
       <div className="container mx-auto p-6 space-y-6">
+        {/* Navigation */}
+        <Navigation />
+        
         {/* Header */}
         <DeviceHeader
           deviceName={parsedData.deviceName}

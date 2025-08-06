@@ -46,7 +46,7 @@ const transformSupabaseData = (data: SensorDataRow): SensorData => {
 };
 
 // Fallback mock data for when no real data is available
-const generateMockData = (): SensorData => {
+const generateMockData = (deviceId?: string): SensorData => {
   const gasLevel = Math.random() * 100;
   const tankLevel = 60 - (gasLevel * 0.4);
   const batteryLevels: ("Full" | "Ok" | "Low")[] = ["Full", "Ok", "Low"];
@@ -54,7 +54,7 @@ const generateMockData = (): SensorData => {
   const connection = Math.floor(70 + Math.random() * 30);
 
   return {
-    id: "C5BAA016-CF65-B806-4E06-0F13B8592C7A",
+    id: deviceId || "C5BAA016-CF65-B806-4E06-0F13B8592C7A",
     titlename: "Gas LPG 15kg Production Tank (Mock Data)",
     tanklevel: `${tankLevel.toFixed(1)} cm`,
     updatedrefresh: "just now",
@@ -64,28 +64,33 @@ const generateMockData = (): SensorData => {
   };
 };
 
-export function useSensorData() {
-  const [sensorData, setSensorData] = useState<SensorData>(generateMockData());
+export function useSensorData(deviceId?: string) {
+  const [sensorData, setSensorData] = useState<SensorData>(generateMockData(deviceId));
   const [isConnected, setIsConnected] = useState(false);
   const [lastUpdate, setLastUpdate] = useState(new Date());
   const [isUsingRealData, setIsUsingRealData] = useState(false);
 
   useEffect(() => {
-    // Function to fetch latest sensor data
+    // Function to fetch latest sensor data for specific device or latest overall
     const fetchLatestData = async () => {
       try {
-        const { data, error } = await supabase
+        let query = supabase
           .from('sensor_data')
           .select('*')
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .single();
+          .order('created_at', { ascending: false });
+
+        // Filter by device ID if specified
+        if (deviceId) {
+          query = query.eq('device_id', deviceId);
+        }
+
+        const { data, error } = await query.limit(1).single();
 
         if (error) {
           console.error('Error fetching sensor data:', error);
           if (!isUsingRealData) {
             // Fall back to mock data if we haven't received real data yet
-            setSensorData(generateMockData());
+            setSensorData(generateMockData(deviceId));
           }
           setIsConnected(false);
           return;
@@ -109,13 +114,14 @@ export function useSensorData() {
 
     // Set up real-time subscription
     const subscription = supabase
-      .channel('sensor_data_changes')
+      .channel(`sensor_data_changes_${deviceId || 'all'}`)
       .on(
         'postgres_changes',
         {
           event: 'INSERT',
           schema: 'public',
-          table: 'sensor_data'
+          table: 'sensor_data',
+          ...(deviceId && { filter: `device_id=eq.${deviceId}` })
         },
         (payload) => {
           console.log('New sensor data received:', payload);
@@ -138,7 +144,7 @@ export function useSensorData() {
       subscription.unsubscribe();
       clearInterval(pollInterval);
     };
-  }, [isUsingRealData]);
+  }, [isUsingRealData, deviceId]);
 
   const parsedData = {
     gasLevel: parseFloat(sensorData.measurement.replace('%', '')),

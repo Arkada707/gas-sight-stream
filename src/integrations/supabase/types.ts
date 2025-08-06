@@ -14,6 +14,72 @@ export type Database = {
   }
   public: {
     Tables: {
+      devices: {
+        Row: {
+          id: string
+          name: string
+          mac_address: string
+          title: string
+          location: string
+          service_uuid: string
+          data_characteristic_uuid: string
+          enabled: boolean
+          color: string
+          rssi: number | null
+          confidence_score: number | null
+          last_discovered: string | null
+          discovery_metadata: Json | null
+          is_connected: boolean
+          last_connected: string | null
+          connection_attempts: number
+          total_packets_received: number
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id: string
+          name: string
+          mac_address: string
+          title: string
+          location?: string
+          service_uuid?: string
+          data_characteristic_uuid?: string
+          enabled?: boolean
+          color?: string
+          rssi?: number | null
+          confidence_score?: number | null
+          last_discovered?: string | null
+          discovery_metadata?: Json | null
+          is_connected?: boolean
+          last_connected?: string | null
+          connection_attempts?: number
+          total_packets_received?: number
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          name?: string
+          mac_address?: string
+          title?: string
+          location?: string
+          service_uuid?: string
+          data_characteristic_uuid?: string
+          enabled?: boolean
+          color?: string
+          rssi?: number | null
+          confidence_score?: number | null
+          last_discovered?: string | null
+          discovery_metadata?: Json | null
+          is_connected?: boolean
+          last_connected?: string | null
+          connection_attempts?: number
+          total_packets_received?: number
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       sensor_data: {
         Row: {
           id: string
@@ -60,11 +126,44 @@ export type Database = {
           created_at?: string
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "fk_sensor_data_device_id"
+            columns: ["device_id"]
+            isOneToOne: false
+            referencedRelation: "devices"
+            referencedColumns: ["id"]
+          }
+        ]
       }
     }
     Views: {
-      [_ in never]: never
+      device_stats: {
+        Row: {
+          id: string
+          name: string
+          title: string
+          location: string
+          color: string
+          enabled: boolean
+          is_connected: boolean
+          last_connected: string | null
+          total_packets_received: number
+          device_created_at: string
+          latest_tank_level: number | null
+          tank_level_unit: string | null
+          latest_measurement: number | null
+          measurement_unit: string | null
+          latest_battery: "Full" | "Ok" | "Low" | null
+          latest_connection_strength: number | null
+          latest_refresh: string | null
+          latest_reading_at: string | null
+          total_readings: number | null
+          readings_last_24h: number | null
+          avg_measurement_24h: number | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       [_ in never]: never

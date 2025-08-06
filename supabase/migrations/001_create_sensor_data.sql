@@ -36,7 +36,8 @@ end;
 $$ language plpgsql;
 
 -- Create trigger to automatically update updated_at
-create trigger if not exists set_updated_at
+drop trigger if exists set_updated_at on public.sensor_data;
+create trigger set_updated_at
   before update on public.sensor_data
   for each row
   execute function public.handle_updated_at();
