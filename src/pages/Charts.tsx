@@ -72,6 +72,7 @@ const Charts = () => {
   const [isLiveConnected, setIsLiveConnected] = useState(false);
   const [lastDataUpdate, setLastDataUpdate] = useState<Date | null>(null);
   const chartContainerRef = useRef<HTMLDivElement>(null);
+  const connectionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const enabledDevices = getEnabledDevices();
 
@@ -145,10 +146,10 @@ const Charts = () => {
       }, 100);
     });
     
-    // Set up periodic refresh as fallback (every 30 seconds)
+    // Set up periodic refresh as fallback (every 2 minutes to avoid conflicts with device data timing)
     const intervalId = setInterval(() => {
       fetchHistoricalData(selectedRange);
-    }, 30000);
+    }, 120000);
     
     return () => {
       clearInterval(intervalId);
@@ -173,6 +174,14 @@ const Charts = () => {
           // Update live connection status and timestamp
           setIsLiveConnected(true);
           setLastDataUpdate(new Date());
+          
+          // Reset connection timeout - expect next update within 3 minutes (device sends ~1min)
+          if (connectionTimeoutRef.current) {
+            clearTimeout(connectionTimeoutRef.current);
+          }
+          connectionTimeoutRef.current = setTimeout(() => {
+            setIsLiveConnected(false);
+          }, 180000); // 3 minutes timeout
           
           // Check if this data point is relevant to current view
           let shouldUpdate = false;
@@ -207,11 +216,14 @@ const Charts = () => {
               }
             }, 100);
             
-            // Enhanced toast notification
-            toast.success(`📊 New data from ${newData.title_name}!`, {
-              duration: 2000,
-              description: `Gas: ${newData.measurement}% • Tank: ${newData.tank_level}cm • Auto-scrolled to latest`,
-            });
+            // Show toast notification only occasionally (every 5th update) to avoid spam
+            const shouldShowToast = Math.random() < 0.2; // 20% chance
+            if (shouldShowToast) {
+              toast.success(`📊 Live data updated`, {
+                duration: 1500,
+                description: `${newData.title_name}: ${newData.measurement}% gas`,
+              });
+            }
             
             // Also refresh data from server to ensure consistency
             setTimeout(() => {
@@ -229,31 +241,39 @@ const Charts = () => {
         },
         (payload) => {
           console.log('Sensor data updated:', payload);
-          // Refresh data when existing data is updated
+          // Refresh data when existing data is updated (silently)
           fetchHistoricalData(selectedRange);
-          toast.info('Data updated!', { duration: 2000 });
         }
       )
       .subscribe((status) => {
         console.log('Real-time subscription status:', status);
         if (status === 'SUBSCRIBED') {
           setIsLiveConnected(true);
-          toast.success('🟢 Live updates connected!', { 
-            duration: 2000,
-            description: 'Charts will update automatically with new data'
-          });
+          // Only show success toast on initial connection, not on every reconnect
+          if (!isLiveConnected) {
+            toast.success('🟢 Live updates connected!', { 
+              duration: 2000,
+              description: 'Charts will update automatically with new data'
+            });
+          }
         } else if (status === 'CLOSED') {
-          setIsLiveConnected(false);
-          toast.warning('🔴 Live updates disconnected', { 
-            duration: 3000,
-            description: 'Charts will use periodic refresh instead'
-          });
+          // Only show warning if we were previously connected
+          if (isLiveConnected) {
+            setIsLiveConnected(false);
+            toast.warning('🔴 Live updates disconnected', { 
+              duration: 2000,
+              description: 'Attempting to reconnect...'
+            });
+          }
         }
       });
 
     return () => {
       subscription.unsubscribe();
       setIsLiveConnected(false);
+      if (connectionTimeoutRef.current) {
+        clearTimeout(connectionTimeoutRef.current);
+      }
     };
   }, [selectedRange, chartMode, selectedDeviceId, enabledDevices]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -602,26 +622,26 @@ const Charts = () => {
         {/* Navigation */}
         <Navigation />
         
-        {/* Live Status Indicator */}
-        <div className="flex items-center justify-center gap-2 mb-4">
-          <div className={`w-3 h-3 rounded-full ${isLiveConnected ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`} />
-          <span className="text-sm text-muted-foreground">
-            {isLiveConnected ? (
-              <span className="text-green-600 font-medium">
-                🟢 Live Updates Active
-                {lastDataUpdate && (
+        {/* Live Status Indicator - Only show if there's been recent activity */}
+        {lastDataUpdate && (
+          <div className="flex items-center justify-center gap-2 mb-4">
+            <div className={`w-3 h-3 rounded-full ${isLiveConnected ? 'bg-green-500' : 'bg-yellow-500'}`} />
+            <span className="text-sm text-muted-foreground">
+              {isLiveConnected ? (
+                <span className="text-green-600 font-medium">
+                  🟢 Live Updates Active
                   <span className="text-xs ml-2">
-                    Last update: {format(lastDataUpdate, 'HH:mm:ss')}
+                    Last: {format(lastDataUpdate, 'HH:mm:ss')}
                   </span>
-                )}
-              </span>
-            ) : (
-              <span className="text-gray-500">
-                🔴 Live Updates Connecting...
-              </span>
-            )}
-          </span>
-        </div>
+                </span>
+              ) : (
+                <span className="text-yellow-600">
+                  ⏱️ Awaiting next update...
+                </span>
+              )}
+            </span>
+          </div>
+        )}
         
         {/* Header */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -805,9 +825,9 @@ const Charts = () => {
                 </div>
                 <div className="mt-4 text-sm text-muted-foreground text-center">
                   💡 Click on any data point to add comments • Chart scrolls horizontally for detailed view
-                  {isLiveConnected && (
+                  {isLiveConnected && lastDataUpdate && (
                     <div className="mt-1 text-xs text-green-600">
-                      ⚡ Auto-updating with live data every few seconds
+                      ⚡ Auto-updating with live data (device sends ~1min intervals)
                     </div>
                   )}
                 </div>
