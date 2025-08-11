@@ -16,28 +16,28 @@ export type Database = {
     Tables: {
       comments: {
         Row: {
+          comment_text: string
+          created_at: string
           id: string
           sensor_data_id: string
-          comment_text: string
-          user_name: string
-          created_at: string
           updated_at: string
+          user_name: string
         }
         Insert: {
+          comment_text: string
+          created_at?: string
           id?: string
           sensor_data_id: string
-          comment_text: string
-          user_name?: string
-          created_at?: string
           updated_at?: string
+          user_name?: string
         }
         Update: {
+          comment_text?: string
+          created_at?: string
           id?: string
           sensor_data_id?: string
-          comment_text?: string
-          user_name?: string
-          created_at?: string
           updated_at?: string
+          user_name?: string
         }
         Relationships: [
           {
@@ -46,7 +46,7 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sensor_data"
             referencedColumns: ["id"]
-          }
+          },
         ]
       }
       devices: {

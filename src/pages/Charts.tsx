@@ -32,6 +32,10 @@ interface ChartDataPoint {
   timestamp: Date;
   time: string;
   raw_timestamp: string;
+  gasLevel?: number;
+  tankLevel?: number;
+  connectionQuality?: number;
+  batteryLevel?: number;
   [key: string]: number | string | Date | Comment[] | undefined; // Dynamic device data keys
 }
 
@@ -131,7 +135,15 @@ const Charts = () => {
   };
 
   useEffect(() => {
-    fetchHistoricalData(selectedRange);
+    fetchHistoricalData(selectedRange).then(() => {
+      // Auto-scroll to latest data when view changes
+      setTimeout(() => {
+        if (chartContainerRef.current) {
+          const scrollContainer = chartContainerRef.current;
+          scrollContainer.scrollLeft = scrollContainer.scrollWidth;
+        }
+      }, 100);
+    });
     
     // Set up periodic refresh as fallback (every 30 seconds)
     const intervalId = setInterval(() => {
@@ -143,7 +155,7 @@ const Charts = () => {
     };
   }, [selectedRange, chartMode, selectedDeviceId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Set up real-time subscription for new data with optimistic updates
+  // Set up real-time subscription for new data with optimistic updates and auto-scroll
   useEffect(() => {
     const subscription = supabase
       .channel('sensor_data_realtime_charts')
@@ -162,11 +174,22 @@ const Charts = () => {
           setIsLiveConnected(true);
           setLastDataUpdate(new Date());
           
-          // Check if this data is relevant to current view
-          const isRelevant = chartMode === 'multi' || 
-                           (chartMode === 'single' && selectedDeviceId === newData.device_id);
+          // Check if this data point is relevant to current view
+          let shouldUpdate = false;
           
-          if (isRelevant) {
+          if (chartMode === 'single') {
+            if (selectedDeviceId && newData.device_id === selectedDeviceId) {
+              shouldUpdate = true;
+            }
+          } else {
+            // In multi-device mode, refresh if any enabled device has new data
+            const enabledDeviceIds = enabledDevices.map(d => d.id);
+            if (enabledDeviceIds.includes(newData.device_id)) {
+              shouldUpdate = true;
+            }
+          }
+          
+          if (shouldUpdate) {
             // Optimistic update - add new data point immediately
             setHistoricalData(prevData => {
               const updatedData = [...prevData, newData];
@@ -176,17 +199,25 @@ const Charts = () => {
               );
             });
             
-            // Show toast notification
-            toast.success(`📊 New data from ${newData.title_name}`, {
+            // Auto-scroll to latest data after optimistic update
+            setTimeout(() => {
+              if (chartContainerRef.current) {
+                const scrollContainer = chartContainerRef.current;
+                scrollContainer.scrollLeft = scrollContainer.scrollWidth;
+              }
+            }, 100);
+            
+            // Enhanced toast notification
+            toast.success(`📊 New data from ${newData.title_name}!`, {
               duration: 2000,
-              description: `Gas: ${newData.measurement}% • Tank: ${newData.tank_level}cm`,
+              description: `Gas: ${newData.measurement}% • Tank: ${newData.tank_level}cm • Auto-scrolled to latest`,
             });
+            
+            // Also refresh data from server to ensure consistency
+            setTimeout(() => {
+              fetchHistoricalData(selectedRange);
+            }, 1000);
           }
-          
-          // Also refresh data from server to ensure consistency
-          setTimeout(() => {
-            fetchHistoricalData(selectedRange);
-          }, 1000);
         }
       )
       .on(
@@ -224,7 +255,7 @@ const Charts = () => {
       subscription.unsubscribe();
       setIsLiveConnected(false);
     };
-  }, [selectedRange, chartMode, selectedDeviceId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedRange, chartMode, selectedDeviceId, enabledDevices]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch comments
   const fetchComments = async () => {
@@ -477,11 +508,11 @@ const Charts = () => {
                       />
                       <span className="font-medium text-sm">{device.title}</span>
                     </div>
-                    <div className="text-sm space-y-1 ml-5">
-                      <p>Gas: {gasLevel.toFixed(1)}%</p>
-                      <p>Tank: {tankLevel.toFixed(1)} cm</p>
-                      <p>Signal: {connection}%</p>
-                    </div>
+                     <div className="text-sm space-y-1 ml-5">
+                       <p>Gas: {typeof gasLevel === 'number' ? gasLevel.toFixed(1) : String(gasLevel)}%</p>
+                       <p>Tank: {typeof tankLevel === 'number' ? tankLevel.toFixed(1) : String(tankLevel)} cm</p>
+                       <p>Signal: {String(connection)}%</p>
+                     </div>
                   </div>
                 );
               }
@@ -983,17 +1014,17 @@ const Charts = () => {
                 <div className="text-sm font-medium">
                   {format(selectedDataPoint.timestamp, 'PPpp')}
                 </div>
-                <div className="text-xs text-muted-foreground mt-1">
-                  {chartMode === 'single' ? (
-                    <div>
-                      Gas: {selectedDataPoint.gasLevel}% | 
-                      Tank: {selectedDataPoint.tankLevel} cm |
-                      Signal: {selectedDataPoint.connectionQuality}%
-                    </div>
-                  ) : (
-                    <div>Multi-device data point</div>
-                  )}
-                </div>
+                 <div className="text-xs text-muted-foreground mt-1">
+                   {chartMode === 'single' ? (
+                      <div>
+                        Gas: {typeof selectedDataPoint.gasLevel === 'number' ? selectedDataPoint.gasLevel.toFixed(1) : 'N/A'}% | 
+                        Tank: {typeof selectedDataPoint.tankLevel === 'number' ? selectedDataPoint.tankLevel.toFixed(1) : 'N/A'} cm |
+                        Signal: {selectedDataPoint.connectionQuality || 'N/A'}%
+                      </div>
+                   ) : (
+                     <div>Multi-device data point</div>
+                   )}
+                 </div>
               </div>
 
               <div className="space-y-3">
