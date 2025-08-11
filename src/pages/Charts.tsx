@@ -1,16 +1,21 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useDeviceData } from "@/hooks/useDeviceData";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { format as formatDate, subHours, subDays, subWeeks, parseISO } from 'date-fns';
-import { TrendingUp, Download, Calendar, Palette, Layers } from "lucide-react";
+import { format, subHours, subDays, subWeeks, parseISO, differenceInMinutes } from 'date-fns';
+import { TrendingUp, Download, Calendar, Palette, Layers, MessageCircle, Send, User } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import Navigation from "@/components/Navigation";
+import { toast } from "sonner";
 
 interface SensorDataPoint {
   id: string;
@@ -27,11 +32,25 @@ interface ChartDataPoint {
   timestamp: Date;
   time: string;
   raw_timestamp: string;
-  [key: string]: any; // Dynamic device data keys
+  [key: string]: number | string | Date | Comment[] | undefined; // Dynamic device data keys
 }
 
 interface DeviceVisibility {
   [deviceId: string]: boolean;
+}
+
+interface Comment {
+  id: string;
+  sensor_data_id: string;
+  comment_text: string;
+  user_name: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface DataPointWithComments extends ChartDataPoint {
+  sensor_data_id?: string;
+  comments?: Comment[];
 }
 
 const Charts = () => {
@@ -41,6 +60,12 @@ const Charts = () => {
   const [selectedRange, setSelectedRange] = useState("24h");
   const [deviceVisibility, setDeviceVisibility] = useState<DeviceVisibility>({});
   const [chartMode, setChartMode] = useState<'single' | 'multi'>('single');
+  const [comments, setComments] = useState<Comment[]>([]);
+  const [selectedDataPoint, setSelectedDataPoint] = useState<DataPointWithComments | null>(null);
+  const [newComment, setNewComment] = useState('');
+  const [userName, setUserName] = useState('Anonymous');
+  const [isCommentDialogOpen, setIsCommentDialogOpen] = useState(false);
+  const chartContainerRef = useRef<HTMLDivElement>(null);
 
   const enabledDevices = getEnabledDevices();
 
@@ -105,20 +130,126 @@ const Charts = () => {
 
   useEffect(() => {
     fetchHistoricalData(selectedRange);
-  }, [selectedRange, chartMode, selectedDeviceId]);
+  }, [selectedRange, chartMode, selectedDeviceId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const formatChartData = (data: SensorDataPoint[]): ChartDataPoint[] => {
+  // Set up real-time subscription for new data
+  useEffect(() => {
+    const subscription = supabase
+      .channel('sensor_data_realtime')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'sensor_data'
+        },
+        (payload) => {
+          console.log('New sensor data received:', payload);
+          // Refresh data when new data comes in
+          fetchHistoricalData(selectedRange);
+          toast.success('New data received! Chart updated.', {
+            duration: 3000,
+          });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [selectedRange]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fetch comments
+  const fetchComments = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('comments')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Error fetching comments:', error);
+        return;
+      }
+
+      setComments(data || []);
+    } catch (error) {
+      console.error('Error:', error);
+    }
+  };
+
+  useEffect(() => {
+    fetchComments();
+  }, []);
+
+  // Real-time subscription for comments
+  useEffect(() => {
+    const subscription = supabase
+      .channel('comments_realtime')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'comments'
+        },
+        () => {
+          fetchComments();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  const formatChartData = (data: SensorDataPoint[]): DataPointWithComments[] => {
     if (chartMode === 'single') {
-      // Single device mode
-      return data.map(point => ({
-        timestamp: parseISO(point.created_at),
-        time: formatDate(parseISO(point.created_at), selectedRange === "1m" ? "MMM dd" : selectedRange === "1w" ? "MMM dd HH:mm" : "HH:mm"),
-        gasLevel: point.measurement,
-        tankLevel: point.tank_level,
-        connectionQuality: point.connection_strength,
-        batteryLevel: point.battery === 'Full' ? 100 : point.battery === 'Ok' ? 75 : 25,
-        raw_timestamp: point.created_at
-      }));
+      // Single device mode - add disconnection gaps
+      const sortedData = data.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+      const result: DataPointWithComments[] = [];
+      
+      for (let i = 0; i < sortedData.length; i++) {
+        const point = sortedData[i];
+        const timestamp = parseISO(point.created_at);
+        
+        // Add gap if there's more than 10 minutes between data points
+        if (i > 0) {
+          const prevTimestamp = parseISO(sortedData[i - 1].created_at);
+          const timeDiff = differenceInMinutes(timestamp, prevTimestamp);
+          
+          if (timeDiff > 10) {
+            // Add a gap marker (null values)
+            result.push({
+              timestamp: new Date(prevTimestamp.getTime() + 5 * 60000), // 5 minutes after last point
+              time: '',
+              gasLevel: null as unknown as number,
+              tankLevel: null as unknown as number,
+              connectionQuality: null as unknown as number,
+              batteryLevel: null as unknown as number,
+              raw_timestamp: '',
+              sensor_data_id: undefined,
+              comments: []
+            });
+          }
+        }
+        
+        const pointComments = comments.filter(c => c.sensor_data_id === point.id);
+        result.push({
+          timestamp,
+          time: format(timestamp, selectedRange === "1m" ? "MMM dd" : selectedRange === "1w" ? "MMM dd HH:mm" : "HH:mm"),
+          gasLevel: point.measurement,
+          tankLevel: point.tank_level,
+          connectionQuality: point.connection_strength,
+          batteryLevel: point.battery === 'Full' ? 100 : point.battery === 'Ok' ? 75 : 25,
+          raw_timestamp: point.created_at,
+          sensor_data_id: point.id,
+          comments: pointComments
+        });
+      }
+      
+      return result;
     } else {
       // Multi-device mode
       const timeGroups: { [timestamp: string]: SensorDataPoint[] } = {};
@@ -131,13 +262,14 @@ const Charts = () => {
         timeGroups[timeKey].push(point);
       });
 
-      const chartPoints: ChartDataPoint[] = [];
+      const chartPoints: DataPointWithComments[] = [];
       
       Object.entries(timeGroups).forEach(([timestamp, points]) => {
-        const chartPoint: ChartDataPoint = {
+        const chartPoint: DataPointWithComments = {
           timestamp: parseISO(timestamp),
-          time: formatDate(parseISO(timestamp), selectedRange === "1m" ? "MMM dd" : selectedRange === "1w" ? "MMM dd HH:mm" : "HH:mm"),
-          raw_timestamp: timestamp
+          time: format(parseISO(timestamp), selectedRange === "1m" ? "MMM dd" : selectedRange === "1w" ? "MMM dd HH:mm" : "HH:mm"),
+          raw_timestamp: timestamp,
+          comments: []
         };
 
         points.forEach(point => {
@@ -146,6 +278,10 @@ const Charts = () => {
           chartPoint[`${devicePrefix}_tankLevel`] = point.tank_level;
           chartPoint[`${devicePrefix}_connection`] = point.connection_strength;
           chartPoint[`${devicePrefix}_battery`] = point.battery === 'Full' ? 100 : point.battery === 'Ok' ? 75 : 25;
+          
+          // Collect comments for this data point
+          const pointComments = comments.filter(c => c.sensor_data_id === point.id);
+          chartPoint.comments = [...(chartPoint.comments || []), ...pointComments];
         });
 
         chartPoints.push(chartPoint);
@@ -156,6 +292,44 @@ const Charts = () => {
   };
 
   const chartData = formatChartData(historicalData);
+
+  // Handle adding comments
+  const handleAddComment = async () => {
+    if (!newComment.trim() || !selectedDataPoint?.sensor_data_id) return;
+
+    try {
+      const { error } = await supabase
+        .from('comments')
+        .insert({
+          sensor_data_id: selectedDataPoint.sensor_data_id,
+          comment_text: newComment.trim(),
+          user_name: userName.trim() || 'Anonymous'
+        });
+
+      if (error) {
+        console.error('Error adding comment:', error);
+        toast.error('Failed to add comment');
+        return;
+      }
+
+      setNewComment('');
+      toast.success('Comment added successfully!');
+    } catch (error) {
+      console.error('Error:', error);
+      toast.error('Failed to add comment');
+    }
+  };
+
+  // Handle chart click to show comment dialog
+  const handleChartClick = (data: { activePayload?: Array<{ payload: DataPointWithComments }> }) => {
+    if (data && data.activePayload && data.activePayload[0]) {
+      const clickedPoint = data.activePayload[0].payload as DataPointWithComments;
+      if (clickedPoint.sensor_data_id) {
+        setSelectedDataPoint(clickedPoint);
+        setIsCommentDialogOpen(true);
+      }
+    }
+  };
 
   const downloadData = (format: 'csv' | 'json') => {
     const dataToDownload = historicalData.map(point => ({
@@ -173,7 +347,7 @@ const Charts = () => {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `sensor_data_${chartMode}_${selectedRange}_${formatDate(new Date(), 'yyyy-MM-dd')}.json`;
+      a.download = `sensor_data_${chartMode}_${selectedRange}_${format(new Date(), 'yyyy-MM-dd')}.json`;
       a.click();
       URL.revokeObjectURL(url);
     } else if (format === 'csv') {
@@ -187,7 +361,7 @@ const Charts = () => {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `sensor_data_${chartMode}_${selectedRange}_${formatDate(new Date(), 'yyyy-MM-dd')}.csv`;
+      a.download = `sensor_data_${chartMode}_${selectedRange}_${format(new Date(), 'yyyy-MM-dd')}.csv`;
       a.click();
       URL.revokeObjectURL(url);
     }
@@ -200,15 +374,15 @@ const Charts = () => {
     }));
   };
 
-  const CustomTooltip = ({ active, payload, label }: any) => {
+  const CustomTooltip = ({ active, payload }: { active?: boolean; payload?: Array<{ color: string; name: string; value: number; payload: DataPointWithComments }>; label?: string }) => {
     if (active && payload && payload.length) {
       const data = payload[0].payload;
       
       if (chartMode === 'single') {
         return (
           <div className="bg-background border border-border rounded-lg p-3 shadow-lg">
-            <p className="font-semibold">{formatDate(data.timestamp, 'PPpp')}</p>
-            {payload.map((entry: any, index: number) => (
+            <p className="font-semibold">{format(data.timestamp, 'PPpp')}</p>
+            {payload.map((entry, index: number) => (
               <p key={index} style={{ color: entry.color }}>
                 {entry.name}: {entry.value.toFixed(1)}{entry.name === 'Gas Level' || entry.name === 'Connection Quality' || entry.name === 'Battery Level' ? '%' : entry.name === 'Tank Level' ? ' cm' : ''}
               </p>
@@ -220,7 +394,7 @@ const Charts = () => {
         
         return (
           <div className="bg-background border border-border rounded-lg p-3 shadow-lg max-w-xs">
-            <p className="font-semibold mb-2">{formatDate(data.timestamp, 'PPpp')}</p>
+            <p className="font-semibold mb-2">{format(data.timestamp, 'PPpp')}</p>
             {visibleDevices.map(device => {
               const gasLevel = data[`${device.id}_gasLevel`];
               const tankLevel = data[`${device.id}_tankLevel`];
@@ -261,6 +435,7 @@ const Charts = () => {
         stroke="#22c55e"
         strokeWidth={2}
         dot={{ fill: '#22c55e', r: 3 }}
+        connectNulls={false}
         name="Gas Level"
       />
       <Line
@@ -269,6 +444,7 @@ const Charts = () => {
         stroke="#3b82f6"
         strokeWidth={2}
         dot={{ fill: '#3b82f6', r: 3 }}
+        connectNulls={false}
         name="Tank Level"
       />
       <Line
@@ -277,6 +453,7 @@ const Charts = () => {
         stroke="#f59e0b"
         strokeWidth={2}
         dot={{ fill: '#f59e0b', r: 3 }}
+        connectNulls={false}
         name="Connection Quality"
       />
       <Line
@@ -285,6 +462,7 @@ const Charts = () => {
         stroke="#ef4444"
         strokeWidth={2}
         dot={{ fill: '#ef4444', r: 3 }}
+        connectNulls={false}
         name="Battery Level"
       />
     </>
@@ -301,6 +479,7 @@ const Charts = () => {
           stroke={device.color}
           strokeWidth={2}
           dot={{ fill: device.color, r: 3 }}
+          connectNulls={false}
           name={`${device.title} (${unit})`}
         />
       ));
@@ -480,24 +659,33 @@ const Charts = () => {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="h-96">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={chartData}>
-                      <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
-                      <XAxis 
-                        dataKey="time" 
-                        tick={{ fontSize: 12 }}
-                        tickLine={{ strokeWidth: 1 }}
-                      />
-                      <YAxis 
-                        tick={{ fontSize: 12 }}
-                        label={{ value: 'Level/Quality (%)', angle: -90, position: 'insideLeft' }}
-                      />
-                      <Tooltip content={<CustomTooltip />} />
-                      <Legend />
-                      {renderSingleDeviceLines()}
-                    </LineChart>
-                  </ResponsiveContainer>
+                <div className="h-96 overflow-x-auto" ref={chartContainerRef}>
+                  <div className="min-w-full" style={{ width: Math.max(800, chartData.length * 50) }}>
+                    <ResponsiveContainer width="100%" height={400}>
+                      <LineChart data={chartData} onClick={handleChartClick}>
+                        <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
+                        <XAxis 
+                          dataKey="time" 
+                          tick={{ fontSize: 12 }}
+                          tickLine={{ strokeWidth: 1 }}
+                          interval={0}
+                          angle={-45}
+                          textAnchor="end"
+                          height={60}
+                        />
+                        <YAxis 
+                          tick={{ fontSize: 12 }}
+                          label={{ value: 'Level/Quality (%)', angle: -90, position: 'insideLeft' }}
+                        />
+                        <Tooltip content={<CustomTooltip />} />
+                        <Legend />
+                        {renderSingleDeviceLines()}
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+                <div className="mt-4 text-sm text-muted-foreground text-center">
+                  💡 Click on any data point to add comments • Chart scrolls horizontally for detailed view
                 </div>
               </CardContent>
             </Card>
@@ -520,21 +708,30 @@ const Charts = () => {
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="h-96">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={chartData}>
-                          <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
-                          <XAxis dataKey="time" tick={{ fontSize: 12 }} />
-                          <YAxis 
-                            domain={[0, 100]}
-                            tick={{ fontSize: 12 }}
-                            label={{ value: 'Gas Level (%)', angle: -90, position: 'insideLeft' }}
-                          />
-                          <Tooltip content={<CustomTooltip />} />
-                          <Legend />
-                          {renderMultiDeviceLines('gasLevel', '%')}
-                        </LineChart>
-                      </ResponsiveContainer>
+                    <div className="h-96 overflow-x-auto">
+                      <div className="min-w-full" style={{ width: Math.max(800, chartData.length * 50) }}>
+                        <ResponsiveContainer width="100%" height={400}>
+                          <LineChart data={chartData} onClick={handleChartClick}>
+                            <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
+                            <XAxis 
+                              dataKey="time" 
+                              tick={{ fontSize: 12 }}
+                              interval={0}
+                              angle={-45}
+                              textAnchor="end"
+                              height={60}
+                            />
+                            <YAxis 
+                              domain={[0, 100]}
+                              tick={{ fontSize: 12 }}
+                              label={{ value: 'Gas Level (%)', angle: -90, position: 'insideLeft' }}
+                            />
+                            <Tooltip content={<CustomTooltip />} />
+                            <Legend />
+                            {renderMultiDeviceLines('gasLevel', '%')}
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
@@ -549,20 +746,29 @@ const Charts = () => {
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="h-96">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={chartData}>
-                          <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
-                          <XAxis dataKey="time" tick={{ fontSize: 12 }} />
-                          <YAxis 
-                            tick={{ fontSize: 12 }}
-                            label={{ value: 'Tank Level (cm)', angle: -90, position: 'insideLeft' }}
-                          />
-                          <Tooltip content={<CustomTooltip />} />
-                          <Legend />
-                          {renderMultiDeviceLines('tankLevel', 'cm')}
-                        </LineChart>
-                      </ResponsiveContainer>
+                    <div className="h-96 overflow-x-auto">
+                      <div className="min-w-full" style={{ width: Math.max(800, chartData.length * 50) }}>
+                        <ResponsiveContainer width="100%" height={400}>
+                          <LineChart data={chartData} onClick={handleChartClick}>
+                            <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
+                            <XAxis 
+                              dataKey="time" 
+                              tick={{ fontSize: 12 }}
+                              interval={0}
+                              angle={-45}
+                              textAnchor="end"
+                              height={60}
+                            />
+                            <YAxis 
+                              tick={{ fontSize: 12 }}
+                              label={{ value: 'Tank Level (cm)', angle: -90, position: 'insideLeft' }}
+                            />
+                            <Tooltip content={<CustomTooltip />} />
+                            <Legend />
+                            {renderMultiDeviceLines('tankLevel', 'cm')}
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
@@ -577,21 +783,30 @@ const Charts = () => {
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="h-96">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={chartData}>
-                          <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
-                          <XAxis dataKey="time" tick={{ fontSize: 12 }} />
-                          <YAxis 
-                            domain={[0, 100]}
-                            tick={{ fontSize: 12 }}
-                            label={{ value: 'Signal Strength (%)', angle: -90, position: 'insideLeft' }}
-                          />
-                          <Tooltip content={<CustomTooltip />} />
-                          <Legend />
-                          {renderMultiDeviceLines('connection', '%')}
-                        </LineChart>
-                      </ResponsiveContainer>
+                    <div className="h-96 overflow-x-auto">
+                      <div className="min-w-full" style={{ width: Math.max(800, chartData.length * 50) }}>
+                        <ResponsiveContainer width="100%" height={400}>
+                          <LineChart data={chartData} onClick={handleChartClick}>
+                            <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
+                            <XAxis 
+                              dataKey="time" 
+                              tick={{ fontSize: 12 }}
+                              interval={0}
+                              angle={-45}
+                              textAnchor="end"
+                              height={60}
+                            />
+                            <YAxis 
+                              domain={[0, 100]}
+                              tick={{ fontSize: 12 }}
+                              label={{ value: 'Signal Strength (%)', angle: -90, position: 'insideLeft' }}
+                            />
+                            <Tooltip content={<CustomTooltip />} />
+                            <Legend />
+                            {renderMultiDeviceLines('connection', '%')}
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
@@ -606,21 +821,30 @@ const Charts = () => {
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="h-96">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={chartData}>
-                          <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
-                          <XAxis dataKey="time" tick={{ fontSize: 12 }} />
-                          <YAxis 
-                            domain={[0, 100]}
-                            tick={{ fontSize: 12 }}
-                            label={{ value: 'Battery Level (%)', angle: -90, position: 'insideLeft' }}
-                          />
-                          <Tooltip content={<CustomTooltip />} />
-                          <Legend />
-                          {renderMultiDeviceLines('battery', '%')}
-                        </LineChart>
-                      </ResponsiveContainer>
+                    <div className="h-96 overflow-x-auto">
+                      <div className="min-w-full" style={{ width: Math.max(800, chartData.length * 50) }}>
+                        <ResponsiveContainer width="100%" height={400}>
+                          <LineChart data={chartData} onClick={handleChartClick}>
+                            <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
+                            <XAxis 
+                              dataKey="time" 
+                              tick={{ fontSize: 12 }}
+                              interval={0}
+                              angle={-45}
+                              textAnchor="end"
+                              height={60}
+                            />
+                            <YAxis 
+                              domain={[0, 100]}
+                              tick={{ fontSize: 12 }}
+                              label={{ value: 'Battery Level (%)', angle: -90, position: 'insideLeft' }}
+                            />
+                            <Tooltip content={<CustomTooltip />} />
+                            <Legend />
+                            {renderMultiDeviceLines('battery', '%')}
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
@@ -649,6 +873,90 @@ const Charts = () => {
           </Card>
         )}
       </div>
+
+      {/* Comment Dialog */}
+      <Dialog open={isCommentDialogOpen} onOpenChange={setIsCommentDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <MessageCircle className="h-5 w-5" />
+              Data Point Comments
+            </DialogTitle>
+          </DialogHeader>
+          
+          {selectedDataPoint && (
+            <div className="space-y-4">
+              <div className="bg-muted/50 p-3 rounded-lg">
+                <div className="text-sm font-medium">
+                  {format(selectedDataPoint.timestamp, 'PPpp')}
+                </div>
+                <div className="text-xs text-muted-foreground mt-1">
+                  {chartMode === 'single' ? (
+                    <div>
+                      Gas: {selectedDataPoint.gasLevel}% | 
+                      Tank: {selectedDataPoint.tankLevel} cm |
+                      Signal: {selectedDataPoint.connectionQuality}%
+                    </div>
+                  ) : (
+                    <div>Multi-device data point</div>
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <User className="h-4 w-4" />
+                  <Input
+                    placeholder="Your name (optional)"
+                    value={userName}
+                    onChange={(e) => setUserName(e.target.value)}
+                    className="flex-1"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Textarea
+                    placeholder="Add your comment about this data point..."
+                    value={newComment}
+                    onChange={(e) => setNewComment(e.target.value)}
+                    className="min-h-[80px]"
+                  />
+                  <Button 
+                    onClick={handleAddComment} 
+                    disabled={!newComment.trim()}
+                    className="w-full"
+                  >
+                    <Send className="h-4 w-4 mr-2" />
+                    Add Comment
+                  </Button>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <h4 className="text-sm font-medium">Existing Comments ({selectedDataPoint.comments?.length || 0})</h4>
+                <ScrollArea className="max-h-40">
+                  {selectedDataPoint.comments && selectedDataPoint.comments.length > 0 ? (
+                    <div className="space-y-2">
+                      {selectedDataPoint.comments.map((comment) => (
+                        <div key={comment.id} className="bg-muted/30 p-2 rounded text-sm">
+                          <div className="font-medium text-xs text-muted-foreground mb-1">
+                            {comment.user_name} • {format(new Date(comment.created_at), 'MMM dd, HH:mm')}
+                          </div>
+                          <div>{comment.comment_text}</div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-sm text-muted-foreground text-center py-4">
+                      No comments yet. Be the first to comment!
+                    </div>
+                  )}
+                </ScrollArea>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

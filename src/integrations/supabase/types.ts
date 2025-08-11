@@ -14,6 +14,41 @@ export type Database = {
   }
   public: {
     Tables: {
+      comments: {
+        Row: {
+          id: string
+          sensor_data_id: string
+          comment_text: string
+          user_name: string
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          sensor_data_id: string
+          comment_text: string
+          user_name?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          sensor_data_id?: string
+          comment_text?: string
+          user_name?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "comments_sensor_data_id_fkey"
+            columns: ["sensor_data_id"]
+            isOneToOne: false
+            referencedRelation: "sensor_data"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
       devices: {
         Row: {
           color: string

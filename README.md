@@ -1,4 +1,4 @@
-# Welcome to your Lovable project
+# Gas Sight Stream - IoT Sensor Monitoring Dashboard
 
 ## Project info
 
@@ -50,15 +50,51 @@ npm run dev
 - Click on "New codespace" to launch a new Codespace environment.
 - Edit files directly within the Codespace and commit and push your changes once you're done.
 
+## New Features Added
+
+### 🔴 Live Updates
+- **Real-time data streaming** using Supabase WebSocket subscriptions
+- **Automatic chart refresh** when new sensor data arrives
+- **Live notifications** when new data is received
+
+### 💬 Interactive Commenting System
+- **Click any data point** on charts to add comments
+- **User identification** with optional name entry
+- **Persistent comments** stored in database
+- **Real-time comment updates** across all users
+- **Comment history** for each data point
+
+### 📊 Enhanced Chart Experience
+- **Horizontal scrolling** for detailed time-series analysis
+- **Responsive chart sizing** based on data points
+- **Improved X-axis** with better label positioning
+- **Click-to-comment** interaction on all chart types
+
+### 🔌 Disconnection Gap Visualization
+- **Intelligent gap detection** when data is missing for >10 minutes
+- **Visual separation** of disconnected periods
+- **connectNulls={false}** to show data interruptions
+- **Clear indication** of sensor connectivity issues
+
+### 📱 User Experience Improvements
+- **Toast notifications** for real-time feedback
+- **Dialog-based commenting** with clean UI
+- **Scroll areas** for long comment lists
+- **Responsive design** for all screen sizes
+
 ## What technologies are used for this project?
 
 This project is built with:
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+- **Vite** - Fast build tool and development server
+- **TypeScript** - Type-safe JavaScript development
+- **React 18** - Modern React with hooks and concurrent features
+- **shadcn/ui** - Beautiful, accessible component library
+- **Tailwind CSS** - Utility-first CSS framework
+- **Supabase** - Backend-as-a-Service with real-time capabilities
+- **Recharts** - Composable charting library for React
+- **Date-fns** - Modern JavaScript date utility library
+- **Sonner** - Toast notifications for React
 
 ## How can I deploy this project?
 
