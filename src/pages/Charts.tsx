@@ -10,7 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceDot } from 'recharts';
 import { format, subHours, subDays, subWeeks, parseISO, differenceInMinutes } from 'date-fns';
 import { TrendingUp, Download, Calendar, Palette, Layers, MessageCircle, Send, User } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
@@ -495,16 +495,54 @@ const Charts = () => {
   const CustomTooltip = ({ active, payload }: { active?: boolean; payload?: Array<{ color: string; name: string; value: number; payload: DataPointWithComments }>; label?: string }) => {
     if (active && payload && payload.length) {
       const data = payload[0].payload;
+      const hasComments = data.comments && data.comments.length > 0;
       
       if (chartMode === 'single') {
         return (
-          <div className="bg-background border border-border rounded-lg p-3 shadow-lg">
+          <div className="bg-background border border-border rounded-lg p-3 shadow-lg max-w-sm">
             <p className="font-semibold">{format(data.timestamp, 'PPpp')}</p>
             {payload.map((entry, index: number) => (
               <p key={index} style={{ color: entry.color }}>
                 {entry.name}: {entry.value.toFixed(1)}{entry.name === 'Gas Level' || entry.name === 'Connection Quality' || entry.name === 'Battery Level' ? '%' : entry.name === 'Tank Level' ? ' cm' : ''}
               </p>
             ))}
+            
+            {/* Comments Preview */}
+            {hasComments && (
+              <div className="mt-3 pt-2 border-t border-border/50">
+                <div className="flex items-center gap-1 mb-2">
+                  <MessageCircle className="h-3 w-3 text-blue-500" />
+                  <span className="text-xs font-medium text-blue-600">
+                    {data.comments.length} comment{data.comments.length !== 1 ? 's' : ''}
+                  </span>
+                </div>
+                <div className="space-y-1 max-h-20 overflow-y-auto">
+                  {data.comments.slice(0, 2).map((comment) => (
+                    <div key={comment.id} className="text-xs bg-muted/50 p-1.5 rounded">
+                      <div className="font-medium text-muted-foreground">{comment.user_name}</div>
+                      <div className="text-foreground">{comment.comment_text.length > 50 ? comment.comment_text.substring(0, 50) + '...' : comment.comment_text}</div>
+                    </div>
+                  ))}
+                  {data.comments.length > 2 && (
+                    <div className="text-xs text-muted-foreground italic">
+                      +{data.comments.length - 2} more comment{data.comments.length - 2 !== 1 ? 's' : ''}...
+                    </div>
+                  )}
+                </div>
+                <div className="text-xs text-blue-600 mt-1 font-medium">
+                  💡 Click to view/add comments
+                </div>
+              </div>
+            )}
+            
+            {/* Click to comment hint for points without comments */}
+            {!hasComments && (
+              <div className="mt-2 pt-2 border-t border-border/50">
+                <div className="text-xs text-muted-foreground">
+                  💬 Click to add a comment
+                </div>
+              </div>
+            )}
           </div>
         );
       } else {
@@ -538,11 +576,44 @@ const Charts = () => {
               }
               return null;
             })}
+            
+            {/* Comments Preview for Multi-device */}
+            {hasComments && (
+              <div className="mt-3 pt-2 border-t border-border/50">
+                <div className="flex items-center gap-1 mb-1">
+                  <MessageCircle className="h-3 w-3 text-blue-500" />
+                  <span className="text-xs font-medium text-blue-600">
+                    {data.comments.length} comment{data.comments.length !== 1 ? 's' : ''}
+                  </span>
+                </div>
+                <div className="text-xs text-blue-600 font-medium">
+                  💡 Click to view/add comments
+                </div>
+              </div>
+            )}
           </div>
         );
       }
     }
     return null;
+  };
+
+  // Render comment indicators as dots on the chart
+  const renderCommentIndicators = () => {
+    const pointsWithComments = chartData.filter(point => point.comments && point.comments.length > 0);
+    
+    return pointsWithComments.map((point, index) => (
+      <ReferenceDot
+        key={`comment-${point.raw_timestamp}-${index}`}
+        x={point.time}
+        y={chartMode === 'single' ? (point.gasLevel || 50) : 50} // Position at gas level for single, middle for multi
+        r={4}
+        fill="#3b82f6"
+        stroke="#ffffff"
+        strokeWidth={2}
+        className="animate-pulse cursor-pointer"
+      />
+    ));
   };
 
   const renderSingleDeviceLines = () => (
@@ -819,12 +890,15 @@ const Charts = () => {
                         <Tooltip content={<CustomTooltip />} />
                         <Legend />
                         {renderSingleDeviceLines()}
+                        {renderCommentIndicators()}
                       </LineChart>
                     </ResponsiveContainer>
                   </div>
                 </div>
                 <div className="mt-4 text-sm text-muted-foreground text-center">
-                  💡 Click on any data point to add comments • Chart scrolls horizontally for detailed view
+                  💡 Click on any data point to add comments • 🔵 Blue dots = comments available • Hover to preview
+                  <br />
+                  Chart scrolls horizontally for detailed view
                   {isLiveConnected && lastDataUpdate && (
                     <div className="mt-1 text-xs text-green-600">
                       ⚡ Auto-updating with live data (device sends ~1min intervals)
@@ -873,6 +947,7 @@ const Charts = () => {
                             <Tooltip content={<CustomTooltip />} />
                             <Legend />
                             {renderMultiDeviceLines('gasLevel', '%')}
+                            {renderCommentIndicators()}
                           </LineChart>
                         </ResponsiveContainer>
                       </div>
@@ -910,6 +985,7 @@ const Charts = () => {
                             <Tooltip content={<CustomTooltip />} />
                             <Legend />
                             {renderMultiDeviceLines('tankLevel', 'cm')}
+                            {renderCommentIndicators()}
                           </LineChart>
                         </ResponsiveContainer>
                       </div>
@@ -948,6 +1024,7 @@ const Charts = () => {
                             <Tooltip content={<CustomTooltip />} />
                             <Legend />
                             {renderMultiDeviceLines('connection', '%')}
+                            {renderCommentIndicators()}
                           </LineChart>
                         </ResponsiveContainer>
                       </div>
@@ -986,6 +1063,7 @@ const Charts = () => {
                             <Tooltip content={<CustomTooltip />} />
                             <Legend />
                             {renderMultiDeviceLines('battery', '%')}
+                            {renderCommentIndicators()}
                           </LineChart>
                         </ResponsiveContainer>
                       </div>
