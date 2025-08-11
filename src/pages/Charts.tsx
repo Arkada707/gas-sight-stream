@@ -32,6 +32,10 @@ interface ChartDataPoint {
   timestamp: Date;
   time: string;
   raw_timestamp: string;
+  gasLevel?: number;
+  tankLevel?: number;
+  connectionQuality?: number;
+  batteryLevel?: number;
   [key: string]: number | string | Date | Comment[] | undefined; // Dynamic device data keys
 }
 
@@ -132,7 +136,7 @@ const Charts = () => {
     fetchHistoricalData(selectedRange);
   }, [selectedRange, chartMode, selectedDeviceId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Set up real-time subscription for new data
+  // Set up real-time subscription for new data with enhanced filtering
   useEffect(() => {
     const subscription = supabase
       .channel('sensor_data_realtime')
@@ -145,11 +149,26 @@ const Charts = () => {
         },
         (payload) => {
           console.log('New sensor data received:', payload);
-          // Refresh data when new data comes in
-          fetchHistoricalData(selectedRange);
-          toast.success('New data received! Chart updated.', {
-            duration: 3000,
-          });
+          const newData = payload.new as SensorDataPoint;
+          
+          // Check if this data point is relevant to current view
+          if (chartMode === 'single') {
+            if (selectedDeviceId && newData.device_id === selectedDeviceId) {
+              fetchHistoricalData(selectedRange);
+              toast.success(`New data from ${newData.title_name}!`, {
+                duration: 2000,
+              });
+            }
+          } else {
+            // In multi-device mode, refresh if any enabled device has new data
+            const enabledDeviceIds = enabledDevices.map(d => d.id);
+            if (enabledDeviceIds.includes(newData.device_id)) {
+              fetchHistoricalData(selectedRange);
+              toast.success(`New data from ${newData.title_name}!`, {
+                duration: 2000,
+              });
+            }
+          }
         }
       )
       .subscribe();
@@ -157,7 +176,7 @@ const Charts = () => {
     return () => {
       subscription.unsubscribe();
     };
-  }, [selectedRange]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedRange, chartMode, selectedDeviceId, enabledDevices]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch comments
   const fetchComments = async () => {
@@ -347,7 +366,7 @@ const Charts = () => {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `sensor_data_${chartMode}_${selectedRange}_${format(new Date(), 'yyyy-MM-dd')}.json`;
+      a.download = `sensor_data_${chartMode}_${selectedRange}_${new Date().toISOString().split('T')[0]}.json`;
       a.click();
       URL.revokeObjectURL(url);
     } else if (format === 'csv') {
@@ -361,7 +380,7 @@ const Charts = () => {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `sensor_data_${chartMode}_${selectedRange}_${format(new Date(), 'yyyy-MM-dd')}.csv`;
+      a.download = `sensor_data_${chartMode}_${selectedRange}_${new Date().toISOString().split('T')[0]}.csv`;
       a.click();
       URL.revokeObjectURL(url);
     }
@@ -410,11 +429,11 @@ const Charts = () => {
                       />
                       <span className="font-medium text-sm">{device.title}</span>
                     </div>
-                    <div className="text-sm space-y-1 ml-5">
-                      <p>Gas: {gasLevel.toFixed(1)}%</p>
-                      <p>Tank: {tankLevel.toFixed(1)} cm</p>
-                      <p>Signal: {connection}%</p>
-                    </div>
+                     <div className="text-sm space-y-1 ml-5">
+                       <p>Gas: {typeof gasLevel === 'number' ? gasLevel.toFixed(1) : String(gasLevel)}%</p>
+                       <p>Tank: {typeof tankLevel === 'number' ? tankLevel.toFixed(1) : String(tankLevel)} cm</p>
+                       <p>Signal: {String(connection)}%</p>
+                     </div>
                   </div>
                 );
               }
@@ -890,17 +909,17 @@ const Charts = () => {
                 <div className="text-sm font-medium">
                   {format(selectedDataPoint.timestamp, 'PPpp')}
                 </div>
-                <div className="text-xs text-muted-foreground mt-1">
-                  {chartMode === 'single' ? (
-                    <div>
-                      Gas: {selectedDataPoint.gasLevel}% | 
-                      Tank: {selectedDataPoint.tankLevel} cm |
-                      Signal: {selectedDataPoint.connectionQuality}%
-                    </div>
-                  ) : (
-                    <div>Multi-device data point</div>
-                  )}
-                </div>
+                 <div className="text-xs text-muted-foreground mt-1">
+                   {chartMode === 'single' ? (
+                      <div>
+                        Gas: {typeof selectedDataPoint.gasLevel === 'number' ? selectedDataPoint.gasLevel.toFixed(1) : 'N/A'}% | 
+                        Tank: {typeof selectedDataPoint.tankLevel === 'number' ? selectedDataPoint.tankLevel.toFixed(1) : 'N/A'} cm |
+                        Signal: {selectedDataPoint.connectionQuality || 'N/A'}%
+                      </div>
+                   ) : (
+                     <div>Multi-device data point</div>
+                   )}
+                 </div>
               </div>
 
               <div className="space-y-3">
