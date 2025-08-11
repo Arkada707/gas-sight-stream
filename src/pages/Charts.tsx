@@ -133,10 +133,18 @@ const Charts = () => {
   };
 
   useEffect(() => {
-    fetchHistoricalData(selectedRange);
+    fetchHistoricalData(selectedRange).then(() => {
+      // Auto-scroll to latest data when view changes
+      setTimeout(() => {
+        if (chartContainerRef.current) {
+          const scrollContainer = chartContainerRef.current;
+          scrollContainer.scrollLeft = scrollContainer.scrollWidth;
+        }
+      }, 100);
+    });
   }, [selectedRange, chartMode, selectedDeviceId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Set up real-time subscription for new data with enhanced filtering
+  // Set up real-time subscription for new data with enhanced filtering and auto-scroll
   useEffect(() => {
     const subscription = supabase
       .channel('sensor_data_realtime')
@@ -152,22 +160,35 @@ const Charts = () => {
           const newData = payload.new as SensorDataPoint;
           
           // Check if this data point is relevant to current view
+          let shouldUpdate = false;
+          
           if (chartMode === 'single') {
             if (selectedDeviceId && newData.device_id === selectedDeviceId) {
-              fetchHistoricalData(selectedRange);
-              toast.success(`New data from ${newData.title_name}!`, {
-                duration: 2000,
-              });
+              shouldUpdate = true;
             }
           } else {
             // In multi-device mode, refresh if any enabled device has new data
             const enabledDeviceIds = enabledDevices.map(d => d.id);
             if (enabledDeviceIds.includes(newData.device_id)) {
-              fetchHistoricalData(selectedRange);
-              toast.success(`New data from ${newData.title_name}!`, {
-                duration: 2000,
-              });
+              shouldUpdate = true;
             }
+          }
+          
+          if (shouldUpdate) {
+            fetchHistoricalData(selectedRange).then(() => {
+              // Auto-scroll to latest data after chart updates
+              setTimeout(() => {
+                if (chartContainerRef.current) {
+                  const scrollContainer = chartContainerRef.current;
+                  scrollContainer.scrollLeft = scrollContainer.scrollWidth;
+                }
+              }, 100);
+            });
+            
+            toast.success(`📊 New data from ${newData.title_name}!`, {
+              duration: 3000,
+              description: "Chart automatically scrolled to latest data"
+            });
           }
         }
       )
