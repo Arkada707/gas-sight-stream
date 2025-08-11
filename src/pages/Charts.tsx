@@ -65,6 +65,8 @@ const Charts = () => {
   const [newComment, setNewComment] = useState('');
   const [userName, setUserName] = useState('Anonymous');
   const [isCommentDialogOpen, setIsCommentDialogOpen] = useState(false);
+  const [isLiveConnected, setIsLiveConnected] = useState(false);
+  const [lastDataUpdate, setLastDataUpdate] = useState<Date | null>(null);
   const chartContainerRef = useRef<HTMLDivElement>(null);
 
   const enabledDevices = getEnabledDevices();
@@ -130,12 +132,21 @@ const Charts = () => {
 
   useEffect(() => {
     fetchHistoricalData(selectedRange);
+    
+    // Set up periodic refresh as fallback (every 30 seconds)
+    const intervalId = setInterval(() => {
+      fetchHistoricalData(selectedRange);
+    }, 30000);
+    
+    return () => {
+      clearInterval(intervalId);
+    };
   }, [selectedRange, chartMode, selectedDeviceId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Set up real-time subscription for new data
+  // Set up real-time subscription for new data with optimistic updates
   useEffect(() => {
     const subscription = supabase
-      .channel('sensor_data_realtime')
+      .channel('sensor_data_realtime_charts')
       .on(
         'postgres_changes',
         {
@@ -145,19 +156,75 @@ const Charts = () => {
         },
         (payload) => {
           console.log('New sensor data received:', payload);
-          // Refresh data when new data comes in
-          fetchHistoricalData(selectedRange);
-          toast.success('New data received! Chart updated.', {
-            duration: 3000,
-          });
+          const newData = payload.new as SensorDataPoint;
+          
+          // Update live connection status and timestamp
+          setIsLiveConnected(true);
+          setLastDataUpdate(new Date());
+          
+          // Check if this data is relevant to current view
+          const isRelevant = chartMode === 'multi' || 
+                           (chartMode === 'single' && selectedDeviceId === newData.device_id);
+          
+          if (isRelevant) {
+            // Optimistic update - add new data point immediately
+            setHistoricalData(prevData => {
+              const updatedData = [...prevData, newData];
+              // Keep data sorted by timestamp
+              return updatedData.sort((a, b) => 
+                new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+              );
+            });
+            
+            // Show toast notification
+            toast.success(`📊 New data from ${newData.title_name}`, {
+              duration: 2000,
+              description: `Gas: ${newData.measurement}% • Tank: ${newData.tank_level}cm`,
+            });
+          }
+          
+          // Also refresh data from server to ensure consistency
+          setTimeout(() => {
+            fetchHistoricalData(selectedRange);
+          }, 1000);
         }
       )
-      .subscribe();
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'sensor_data'
+        },
+        (payload) => {
+          console.log('Sensor data updated:', payload);
+          // Refresh data when existing data is updated
+          fetchHistoricalData(selectedRange);
+          toast.info('Data updated!', { duration: 2000 });
+        }
+      )
+      .subscribe((status) => {
+        console.log('Real-time subscription status:', status);
+        if (status === 'SUBSCRIBED') {
+          setIsLiveConnected(true);
+          toast.success('🟢 Live updates connected!', { 
+            duration: 2000,
+            description: 'Charts will update automatically with new data'
+          });
+        } else if (status === 'CLOSED') {
+          setIsLiveConnected(false);
+          toast.warning('🔴 Live updates disconnected', { 
+            duration: 3000,
+            description: 'Charts will use periodic refresh instead'
+          });
+        }
+      });
 
     return () => {
       subscription.unsubscribe();
+      setIsLiveConnected(false);
     };
-  }, [selectedRange]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedRange, chartMode, selectedDeviceId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch comments
   const fetchComments = async () => {
@@ -504,6 +571,27 @@ const Charts = () => {
         {/* Navigation */}
         <Navigation />
         
+        {/* Live Status Indicator */}
+        <div className="flex items-center justify-center gap-2 mb-4">
+          <div className={`w-3 h-3 rounded-full ${isLiveConnected ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`} />
+          <span className="text-sm text-muted-foreground">
+            {isLiveConnected ? (
+              <span className="text-green-600 font-medium">
+                🟢 Live Updates Active
+                {lastDataUpdate && (
+                  <span className="text-xs ml-2">
+                    Last update: {format(lastDataUpdate, 'HH:mm:ss')}
+                  </span>
+                )}
+              </span>
+            ) : (
+              <span className="text-gray-500">
+                🔴 Live Updates Connecting...
+              </span>
+            )}
+          </span>
+        </div>
+        
         {/* Header */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
@@ -686,6 +774,11 @@ const Charts = () => {
                 </div>
                 <div className="mt-4 text-sm text-muted-foreground text-center">
                   💡 Click on any data point to add comments • Chart scrolls horizontally for detailed view
+                  {isLiveConnected && (
+                    <div className="mt-1 text-xs text-green-600">
+                      ⚡ Auto-updating with live data every few seconds
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>
