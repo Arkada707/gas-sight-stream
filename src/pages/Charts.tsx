@@ -465,7 +465,7 @@ const Charts = () => {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `sensor_data_${chartMode}_${selectedRange}_${format(new Date(), 'yyyy-MM-dd')}.json`;
+      a.download = `sensor_data_${chartMode}_${selectedRange}_${date_format(new Date(), 'yyyy-MM-dd')}.json`;
       a.click();
       URL.revokeObjectURL(url);
     } else if (format === 'csv') {
@@ -479,7 +479,7 @@ const Charts = () => {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `sensor_data_${chartMode}_${selectedRange}_${format(new Date(), 'yyyy-MM-dd')}.csv`;
+      a.download = `sensor_data_${chartMode}_${selectedRange}_${date_format(new Date(), 'yyyy-MM-dd')}.csv`;
       a.click();
       URL.revokeObjectURL(url);
     }
