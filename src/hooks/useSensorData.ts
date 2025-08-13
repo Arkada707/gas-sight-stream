@@ -45,27 +45,21 @@ const transformSupabaseData = (data: SensorDataRow): SensorData => {
   };
 };
 
-// Fallback mock data for when no real data is available
-const generateMockData = (deviceId?: string): SensorData => {
-  const gasLevel = Math.random() * 100;
-  const tankLevel = 60 - (gasLevel * 0.4);
-  const batteryLevels: ("Full" | "Ok" | "Low")[] = ["Full", "Ok", "Low"];
-  const battery = batteryLevels[Math.floor(Math.random() * batteryLevels.length)];
-  const connection = Math.floor(70 + Math.random() * 30);
-
+// Default empty data structure
+const getEmptyData = (deviceId?: string): SensorData => {
   return {
-    id: deviceId || "C5BAA016-CF65-B806-4E06-0F13B8592C7A",
-    titlename: "Gas LPG 15kg Production Tank (Mock Data)",
-    tanklevel: `${tankLevel.toFixed(1)} cm`,
-    updatedrefresh: "just now",
-    battery,
-    connection: `${connection}%`,
-    measurement: `${gasLevel.toFixed(1)}%`
+    id: deviceId || "",
+    titlename: "No data available",
+    tanklevel: "0 cm",
+    updatedrefresh: "never",
+    battery: "Unknown",
+    connection: "0%",
+    measurement: "0%"
   };
 };
 
 export function useSensorData(deviceId?: string) {
-  const [sensorData, setSensorData] = useState<SensorData>(generateMockData(deviceId));
+  const [sensorData, setSensorData] = useState<SensorData>(getEmptyData(deviceId));
   const [isConnected, setIsConnected] = useState(false);
   const [lastUpdate, setLastUpdate] = useState(new Date());
   const [isUsingRealData, setIsUsingRealData] = useState(false);
@@ -89,8 +83,8 @@ export function useSensorData(deviceId?: string) {
         if (error) {
           console.error('Error fetching sensor data:', error);
           if (!isUsingRealData) {
-            // Fall back to mock data if we haven't received real data yet
-            setSensorData(generateMockData(deviceId));
+            // Keep empty data structure if no real data available
+            setSensorData(getEmptyData(deviceId));
           }
           setIsConnected(false);
           return;

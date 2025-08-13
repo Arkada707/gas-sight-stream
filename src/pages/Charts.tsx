@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceDot } from 'recharts';
-import { format, subHours, subDays, subWeeks, parseISO, differenceInMinutes } from 'date-fns';
+import { format, subHours, subDays, subWeeks, subMinutes, parseISO, differenceInMinutes } from 'date-fns';
 import { TrendingUp, Download, Calendar, Palette, Layers, MessageCircle, Send, User } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import Navigation from "@/components/Navigation";
@@ -71,17 +71,21 @@ const Charts = () => {
   const [isCommentDialogOpen, setIsCommentDialogOpen] = useState(false);
   const [isLiveConnected, setIsLiveConnected] = useState(false);
   const [lastDataUpdate, setLastDataUpdate] = useState<Date | null>(null);
+  const [isLiveMode, setIsLiveMode] = useState(false);
+  const [maxLiveDataPoints] = useState(20);
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const connectionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const enabledDevices = getEnabledDevices();
 
   const timeRanges = {
+    "1min": { minutes: 1, label: "1 Minute" },
     "3h": { hours: 3, label: "3 Hours" },
     "6h": { hours: 6, label: "6 Hours" },
     "24h": { hours: 24, label: "24 Hours" },
     "1w": { days: 7, label: "1 Week" },
-    "1m": { days: 30, label: "1 Month" }
+    "1m": { days: 30, label: "1 Month" },
+    "live": { live: true, label: "Live Stream" }
   };
 
   // Initialize device visibility
@@ -99,21 +103,40 @@ const Charts = () => {
       let startDate: Date;
       const now = new Date();
 
-      if (range === "1w") {
-        startDate = subWeeks(now, 1);
-      } else if (range === "1m") {
-        startDate = subDays(now, 30);
+      // Standardize all date calculations to use UTC for consistency
+      const rangeData = timeRanges[range as keyof typeof timeRanges];
+      
+      if ('live' in rangeData) {
+        // For live mode, get last 20 data points regardless of time
+        startDate = subHours(now, 1); // Get last hour for live mode
+      } else if ('minutes' in rangeData) {
+        startDate = subMinutes(now, rangeData.minutes);
+      } else if ('hours' in rangeData) {
+        startDate = subHours(now, rangeData.hours);
+      } else if ('days' in rangeData) {
+        startDate = subDays(now, rangeData.days);
       } else {
-        const rangeData = timeRanges[range as keyof typeof timeRanges];
-        const hours = 'hours' in rangeData ? rangeData.hours : 24;
-        startDate = subHours(now, hours);
+        // Fallback to 3 hours
+        startDate = subHours(now, 3);
       }
+
+      console.log(`Fetching data for ${range}: from ${startDate.toISOString()} to ${now.toISOString()}`);
 
       let query = supabase
         .from('sensor_data')
-        .select('*')
-        .gte('created_at', startDate.toISOString())
-        .order('created_at', { ascending: true });
+        .select('*');
+
+      if ('live' in rangeData) {
+        // For live mode, get the most recent data points
+        query = query
+          .order('created_at', { ascending: false })
+          .limit(maxLiveDataPoints);
+      } else {
+        // For historical data
+        query = query
+          .gte('created_at', startDate.toISOString())
+          .order('created_at', { ascending: true });
+      }
 
       // Filter by selected device in single mode
       if (chartMode === 'single' && selectedDeviceId) {
@@ -127,7 +150,18 @@ const Charts = () => {
         return;
       }
 
-      setHistoricalData((data || []) as SensorDataPoint[]);
+      let processedData = (data || []) as SensorDataPoint[];
+      
+      // For live mode, reverse the data to show chronologically (newest first becomes newest last)
+      if ('live' in rangeData) {
+        processedData = processedData.reverse();
+        setIsLiveMode(true);
+      } else {
+        setIsLiveMode(false);
+      }
+
+      console.log(`Retrieved ${processedData.length} data points for ${range}`);
+      setHistoricalData(processedData);
     } catch (error) {
       console.error('Error:', error);
     } finally {
@@ -146,9 +180,11 @@ const Charts = () => {
       }, 100);
     });
     
-    // Set up periodic refresh as fallback (every 2 minutes to avoid conflicts with device data timing)
+    // Set up periodic refresh as fallback (every 2 minutes, skip for live mode)
     const intervalId = setInterval(() => {
-      fetchHistoricalData(selectedRange);
+      if (!isLiveMode) {
+        fetchHistoricalData(selectedRange);
+      }
     }, 120000);
     
     return () => {
@@ -201,20 +237,31 @@ const Charts = () => {
           if (shouldUpdate) {
             // Optimistic update - add new data point immediately
             setHistoricalData(prevData => {
-              const updatedData = [...prevData, newData];
-              // Keep data sorted by timestamp
-              return updatedData.sort((a, b) => 
-                new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-              );
+              if (isLiveMode) {
+                // For live mode, add to end and remove oldest if exceeding max points
+                const updatedData = [...prevData, newData];
+                if (updatedData.length > maxLiveDataPoints) {
+                  return updatedData.slice(-maxLiveDataPoints);
+                }
+                return updatedData;
+              } else {
+                // For historical mode, sort by timestamp
+                const updatedData = [...prevData, newData];
+                return updatedData.sort((a, b) => 
+                  new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+                );
+              }
             });
             
-            // Auto-scroll to latest data after optimistic update
-            setTimeout(() => {
-              if (chartContainerRef.current) {
-                const scrollContainer = chartContainerRef.current;
-                scrollContainer.scrollLeft = scrollContainer.scrollWidth;
-              }
-            }, 100);
+            // Auto-scroll to latest data after optimistic update (only for historical mode)
+            if (!isLiveMode) {
+              setTimeout(() => {
+                if (chartContainerRef.current) {
+                  const scrollContainer = chartContainerRef.current;
+                  scrollContainer.scrollLeft = scrollContainer.scrollWidth;
+                }
+              }, 100);
+            }
             
             // Show toast notification only occasionally (every 5th update) to avoid spam
             const shouldShowToast = Math.random() < 0.2; // 20% chance
@@ -225,10 +272,12 @@ const Charts = () => {
               });
             }
             
-            // Also refresh data from server to ensure consistency
-            setTimeout(() => {
-              fetchHistoricalData(selectedRange);
-            }, 1000);
+            // Refresh data from server to ensure consistency (skip for live mode as it manages its own data)
+            if (!isLiveMode) {
+              setTimeout(() => {
+                fetchHistoricalData(selectedRange);
+              }, 1000);
+            }
           }
         }
       )
@@ -354,9 +403,14 @@ const Charts = () => {
         }
         
         const pointComments = comments.filter(c => c.sensor_data_id === point.id);
+        const timeFormat = selectedRange === "1min" ? "HH:mm:ss" : 
+                         selectedRange === "1m" ? "MMM dd" : 
+                         selectedRange === "1w" ? "MMM dd HH:mm" : 
+                         selectedRange === "live" ? "HH:mm:ss" : "HH:mm";
+        
         result.push({
           timestamp,
-          time: format(timestamp, selectedRange === "1m" ? "MMM dd" : selectedRange === "1w" ? "MMM dd HH:mm" : "HH:mm"),
+          time: format(timestamp, timeFormat),
           gasLevel: point.measurement,
           tankLevel: point.tank_level,
           connectionQuality: point.connection_strength,
@@ -383,9 +437,14 @@ const Charts = () => {
       const chartPoints: DataPointWithComments[] = [];
       
       Object.entries(timeGroups).forEach(([timestamp, points]) => {
+        const timeFormat = selectedRange === "1min" ? "HH:mm:ss" : 
+                         selectedRange === "1m" ? "MMM dd" : 
+                         selectedRange === "1w" ? "MMM dd HH:mm" : 
+                         selectedRange === "live" ? "HH:mm:ss" : "HH:mm";
+        
         const chartPoint: DataPointWithComments = {
           timestamp: parseISO(timestamp),
-          time: format(parseISO(timestamp), selectedRange === "1m" ? "MMM dd" : selectedRange === "1w" ? "MMM dd HH:mm" : "HH:mm"),
+          time: format(parseISO(timestamp), timeFormat),
           raw_timestamp: timestamp,
           comments: []
         };
@@ -719,12 +778,18 @@ const Charts = () => {
           <div>
             <h1 className="text-3xl font-bold text-foreground">
               {chartMode === 'single' ? 'Device Charts' : 'Multi-Device Charts'}
+              {isLiveMode && <span className="ml-2 text-lg text-green-600">🎥 LIVE</span>}
             </h1>
             <p className="text-muted-foreground mt-1">
-              {chartMode === 'single' 
-                ? 'Historical data visualization for selected device'
-                : 'Compare data across multiple devices with color-coded visualization'
-              }
+              {isLiveMode ? (
+                <span className="text-green-600">
+                  Live streaming mode - Real-time data updates with last {maxLiveDataPoints} data points
+                </span>
+              ) : (
+                chartMode === 'single' 
+                  ? 'Historical data visualization for selected device'
+                  : 'Compare data across multiple devices with color-coded visualization'
+              )}
             </p>
           </div>
           
@@ -810,8 +875,9 @@ const Charts = () => {
                     variant={selectedRange === key ? "default" : "outline"}
                     size="sm"
                     onClick={() => setSelectedRange(key)}
+                    className={key === "live" ? "border-green-500 text-green-600" : ""}
                   >
-                    {range.label}
+                    {key === "live" && "🎥 "}{range.label}
                   </Button>
                 ))}
               </div>
@@ -869,8 +935,8 @@ const Charts = () => {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="h-96 overflow-x-auto" ref={chartContainerRef}>
-                  <div className="min-w-full" style={{ width: Math.max(800, chartData.length * 50) }}>
+                <div className={`h-96 ${isLiveMode ? '' : 'overflow-x-auto'}`} ref={chartContainerRef}>
+                  <div className="min-w-full" style={{ width: isLiveMode ? '100%' : Math.max(800, chartData.length * 50) }}>
                     <ResponsiveContainer width="100%" height={400}>
                       <LineChart data={chartData} onClick={handleChartClick}>
                         <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
@@ -898,7 +964,13 @@ const Charts = () => {
                 <div className="mt-4 text-sm text-muted-foreground text-center">
                   💡 Click on any data point to add comments • 🔵 Blue dots = comments available • Hover to preview
                   <br />
-                  Chart scrolls horizontally for detailed view
+                  {isLiveMode ? (
+                    <span className="text-green-600 font-medium">
+                      🎥 Live Streaming Mode - Shows last {maxLiveDataPoints} data points • No scrolling
+                    </span>
+                  ) : (
+                    <>Chart scrolls horizontally for detailed view</>
+                  )}
                   {isLiveConnected && lastDataUpdate && (
                     <div className="mt-1 text-xs text-green-600">
                       ⚡ Auto-updating with live data (device sends ~1min intervals)
@@ -926,8 +998,8 @@ const Charts = () => {
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="h-96 overflow-x-auto">
-                      <div className="min-w-full" style={{ width: Math.max(800, chartData.length * 50) }}>
+                    <div className={`h-96 ${isLiveMode ? '' : 'overflow-x-auto'}`}>
+                      <div className="min-w-full" style={{ width: isLiveMode ? '100%' : Math.max(800, chartData.length * 50) }}>
                         <ResponsiveContainer width="100%" height={400}>
                           <LineChart data={chartData} onClick={handleChartClick}>
                             <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
@@ -965,8 +1037,8 @@ const Charts = () => {
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="h-96 overflow-x-auto">
-                      <div className="min-w-full" style={{ width: Math.max(800, chartData.length * 50) }}>
+                    <div className={`h-96 ${isLiveMode ? '' : 'overflow-x-auto'}`}>
+                      <div className="min-w-full" style={{ width: isLiveMode ? '100%' : Math.max(800, chartData.length * 50) }}>
                         <ResponsiveContainer width="100%" height={400}>
                           <LineChart data={chartData} onClick={handleChartClick}>
                             <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
@@ -1003,8 +1075,8 @@ const Charts = () => {
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="h-96 overflow-x-auto">
-                      <div className="min-w-full" style={{ width: Math.max(800, chartData.length * 50) }}>
+                    <div className={`h-96 ${isLiveMode ? '' : 'overflow-x-auto'}`}>
+                      <div className="min-w-full" style={{ width: isLiveMode ? '100%' : Math.max(800, chartData.length * 50) }}>
                         <ResponsiveContainer width="100%" height={400}>
                           <LineChart data={chartData} onClick={handleChartClick}>
                             <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
@@ -1042,8 +1114,8 @@ const Charts = () => {
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="h-96 overflow-x-auto">
-                      <div className="min-w-full" style={{ width: Math.max(800, chartData.length * 50) }}>
+                    <div className={`h-96 ${isLiveMode ? '' : 'overflow-x-auto'}`}>
+                      <div className="min-w-full" style={{ width: isLiveMode ? '100%' : Math.max(800, chartData.length * 50) }}>
                         <ResponsiveContainer width="100%" height={400}>
                           <LineChart data={chartData} onClick={handleChartClick}>
                             <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
