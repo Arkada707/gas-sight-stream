@@ -197,7 +197,39 @@ export type Database = {
       }
     }
     Functions: {
-      [_ in never]: never
+      get_device_stats: {
+        Args: Record<PropertyKey, never>
+        Returns: {
+          id: string
+          name: string
+          title: string
+          location: string
+          color: string
+          enabled: boolean
+          is_connected: boolean
+          last_connected: string
+          mac_address: string
+          service_uuid: string
+          data_characteristic_uuid: string
+          rssi: number
+          confidence_score: number
+          last_discovered: string
+          connection_attempts: number
+          total_packets_received: number
+          device_created_at: string
+          device_updated_at: string
+          latest_tank_level: number
+          latest_measurement: number
+          latest_battery: string
+          latest_connection_strength: number
+          latest_reading_at: string
+          tank_level_unit: string
+          measurement_unit: string
+          total_readings: number
+          readings_last_24h: number
+          avg_measurement_24h: number
+        }[]
+      }
     }
     Enums: {
       [_ in never]: never
