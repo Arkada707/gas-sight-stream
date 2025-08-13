@@ -449,7 +449,7 @@ const Charts = () => {
     }
   };
 
-  const downloadData = (format: 'csv' | 'json') => {
+  const downloadData = (fileFormat: 'csv' | 'json') => {
     const dataToDownload = historicalData.map(point => ({
       timestamp: point.created_at,
       device_id: point.device_id,
@@ -460,7 +460,7 @@ const Charts = () => {
       connection_strength: point.connection_strength
     }));
 
-    if (format === 'json') {
+    if (fileFormat === 'json') {
       const blob = new Blob([JSON.stringify(dataToDownload, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -468,7 +468,7 @@ const Charts = () => {
       a.download = `sensor_data_${chartMode}_${selectedRange}_${format(new Date(), 'yyyy-MM-dd')}.json`;
       a.click();
       URL.revokeObjectURL(url);
-    } else if (format === 'csv') {
+    } else if (fileFormat === 'csv') {
       const headers = ['timestamp', 'device_id', 'device_title', 'gas_level', 'tank_level', 'battery', 'connection_strength'];
       const csvContent = [
         headers.join(','),
