@@ -62,21 +62,21 @@ export interface DeviceManagementHook {
 }
 
 // Transform device stats view to Device interface
-const transformDeviceStats = (stats: DeviceStatsRow): Device => ({
-  id: stats.id,
-  name: stats.name,
-  title: stats.title,
-  location: stats.location,
-  color: stats.color,
-  enabled: stats.enabled,
-  isConnected: stats.is_connected,
+const transformDeviceStats = (stats: any): Device => ({
+  id: stats.id || 'unknown',
+  name: stats.name || 'Unknown Device',
+  title: stats.title || 'Untitled',
+  location: stats.location || 'Unknown',
+  color: stats.color || '#808080',
+  enabled: stats.enabled ?? true,
+  isConnected: stats.is_connected ?? false,
   lastConnected: stats.last_connected || undefined,
-  macAddress: '', // Will be filled from devices table
-  serviceUuid: '', // Will be filled from devices table  
-  dataCharacteristicUuid: '', // Will be filled from devices table
-  connectionAttempts: 0, // Will be filled from devices table
-  totalPacketsReceived: stats.total_packets_received,
-  latestData: stats.latest_tank_level !== null ? {
+  macAddress: stats.mac_address || '', // Try to get from stats first
+  serviceUuid: stats.service_uuid || '', // Try to get from stats first
+  dataCharacteristicUuid: stats.data_characteristic_uuid || '', // Try to get from stats first
+  connectionAttempts: stats.connection_attempts || 0,
+  totalPacketsReceived: stats.total_packets_received || 0,
+  latestData: stats.latest_tank_level !== null && stats.latest_tank_level !== undefined ? {
     tankLevel: stats.latest_tank_level,
     tankLevelUnit: stats.tank_level_unit || 'cm',
     measurement: stats.latest_measurement || 0,
@@ -122,37 +122,62 @@ export function useDeviceData(): DeviceManagementHook {
       setIsLoading(true);
       setError(null);
 
-      // Fetch devices from device_stats view for comprehensive data
-      const { data: deviceStats, error: statsError } = await supabase
-        .from('device_stats')
-        .select('*')
-        .order('device_created_at', { ascending: false });
+      // Try device_stats view first, fallback to devices table
+      let devices: Device[] = [];
+      
+      try {
+        // Try device_stats view with proper error handling
+        const { data: deviceStats, error: statsError } = await supabase
+          .from('device_stats')
+          .select('*')
+          .order('created_at', { ascending: false }); // Use created_at instead of device_created_at
 
-      if (statsError) {
-        throw new Error(`Error fetching device stats: ${statsError.message}`);
-      }
-
-      // Fetch detailed device info to fill in missing fields
-      const { data: deviceDetails, error: detailsError } = await supabase
-        .from('devices')
-        .select('*');
-
-      if (detailsError) {
-        throw new Error(`Error fetching device details: ${detailsError.message}`);
-      }
-
-      // Combine stats with detailed device info
-      const combinedDevices: Device[] = (deviceStats || []).map(stats => {
-        const device = transformDeviceStats(stats);
-        const details = deviceDetails?.find(d => d.id === stats.id);
-        
-        if (details) {
-          const deviceInfo = transformDevice(details);
-          return { ...device, ...deviceInfo };
+        if (!statsError && deviceStats) {
+          // Transform device stats data
+          devices = deviceStats.map(stats => transformDeviceStats(stats));
+        } else {
+          throw new Error('device_stats view failed');
         }
+      } catch (viewError) {
+        console.warn('device_stats view not available, using devices table directly');
         
-        return device;
-      });
+        // Fallback to devices table directly
+        const { data: deviceData, error: deviceError } = await supabase
+          .from('devices')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (deviceError) {
+          throw new Error(`Error fetching devices: ${deviceError.message}`);
+        }
+
+        // Transform device data and add empty stats
+        devices = (deviceData || []).map(device => {
+          const deviceInfo = transformDevice(device);
+          return {
+            ...deviceInfo,
+            // Add missing Device interface fields with defaults
+            id: deviceInfo.id || 'unknown',
+            name: deviceInfo.name || 'Unknown Device',
+            title: deviceInfo.title || 'Untitled',
+            location: deviceInfo.location || 'Unknown',
+            color: deviceInfo.color || '#808080',
+            enabled: deviceInfo.enabled ?? true,
+            isConnected: deviceInfo.isConnected ?? false,
+            macAddress: deviceInfo.macAddress || '',
+            serviceUuid: deviceInfo.serviceUuid || '',
+            dataCharacteristicUuid: deviceInfo.dataCharacteristicUuid || '',
+            connectionAttempts: deviceInfo.connectionAttempts || 0,
+            totalPacketsReceived: deviceInfo.totalPacketsReceived || 0,
+            // Add empty stats since we don't have them
+            totalReadings: 0,
+            readingsLast24h: 0,
+            avgMeasurement24h: 0,
+          } as Device;
+        });
+      }
+
+      const combinedDevices = devices;
 
       setDevices(combinedDevices);
 
