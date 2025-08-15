@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useDeviceData } from "@/hooks/useDeviceData";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -75,6 +75,11 @@ const Charts = () => {
   const [maxLiveDataPoints] = useState(20);
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const connectionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [refreshInterval, setRefreshInterval] = useState<number>(60000); // Default 1 minute
+  const [isAutoRefresh, setIsAutoRefresh] = useState(false);
+  const [countdown, setCountdown] = useState<number>(0);
+  const refreshIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const enabledDevices = getEnabledDevices();
 
@@ -169,6 +174,44 @@ const Charts = () => {
     }
   };
 
+  // Function to start countdown timer
+  const startCountdownTimer = (intervalMs: number) => {
+    const startTime = Date.now();
+    setCountdown(Math.ceil(intervalMs / 1000));
+
+    // Clear any existing countdown
+    if (countdownIntervalRef.current) {
+      clearInterval(countdownIntervalRef.current);
+    }
+
+    countdownIntervalRef.current = setInterval(() => {
+      const elapsed = Date.now() - startTime;
+      const remaining = Math.max(0, Math.ceil((intervalMs - elapsed) / 1000));
+      setCountdown(remaining);
+
+      if (remaining === 0) {
+        if (countdownIntervalRef.current) {
+          clearInterval(countdownIntervalRef.current);
+        }
+      }
+    }, 1000);
+  };
+
+  // Function to refresh data and restart interval
+  const refreshData = React.useCallback(() => {
+    if (!isLiveMode) {
+      fetchHistoricalData(selectedRange).then(() => {
+        // Auto-scroll to latest data when data refreshes
+        setTimeout(() => {
+          if (chartContainerRef.current) {
+            const scrollContainer = chartContainerRef.current;
+            scrollContainer.scrollLeft = scrollContainer.scrollWidth;
+          }
+        }, 100);
+      });
+    }
+  }, [selectedRange, isLiveMode]);
+
   useEffect(() => {
     fetchHistoricalData(selectedRange).then(() => {
       // Auto-scroll to latest data when view changes
@@ -179,18 +222,41 @@ const Charts = () => {
         }
       }, 100);
     });
-    
-    // Set up periodic refresh as fallback (every 2 minutes, skip for live mode)
-    const intervalId = setInterval(() => {
-      if (!isLiveMode) {
-        fetchHistoricalData(selectedRange);
-      }
-    }, 120000);
-    
-    return () => {
-      clearInterval(intervalId);
-    };
   }, [selectedRange, chartMode, selectedDeviceId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Manage auto refresh intervals
+  useEffect(() => {
+    if (refreshIntervalRef.current) {
+      clearInterval(refreshIntervalRef.current);
+    }
+    if (countdownIntervalRef.current) {
+      clearInterval(countdownIntervalRef.current);
+    }
+
+    if (isAutoRefresh && !isLiveMode) {
+      const intervalMs = refreshInterval;
+      
+      // Start countdown immediately 
+      startCountdownTimer(intervalMs);
+      
+      // Set up the refresh interval
+      refreshIntervalRef.current = setInterval(() => {
+        refreshData();
+        startCountdownTimer(intervalMs);
+      }, intervalMs);
+    } else {
+      setCountdown(0);
+    }
+
+    return () => {
+      if (refreshIntervalRef.current) {
+        clearInterval(refreshIntervalRef.current);
+      }
+      if (countdownIntervalRef.current) {
+        clearInterval(countdownIntervalRef.current);
+      }
+    };
+  }, [isAutoRefresh, refreshInterval, isLiveMode, refreshData]);
 
   // Set up real-time subscription for new data with optimistic updates and auto-scroll
   useEffect(() => {
@@ -798,6 +864,16 @@ const Charts = () => {
               <Button
                 variant="outline"
                 size="sm"
+                onClick={refreshData}
+                disabled={loading}
+                className="flex items-center gap-2"
+              >
+                <TrendingUp className="h-4 w-4" />
+                {loading ? 'Refreshing...' : 'Refresh Now'}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
                 onClick={() => downloadData('csv')}
                 className="flex items-center gap-2"
               >
@@ -818,7 +894,7 @@ const Charts = () => {
         </div>
 
         {/* Controls */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
           {/* Chart Mode */}
           <Card>
             <CardHeader>
@@ -880,6 +956,74 @@ const Charts = () => {
                     {key === "live" && "🎥 "}{range.label}
                   </Button>
                 ))}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Refresh Interval Controls */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <TrendingUp className="h-5 w-5" />
+                Auto Refresh
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="auto-refresh" className="text-sm font-medium">
+                    Enable Auto Refresh
+                  </Label>
+                  <Switch
+                    id="auto-refresh"
+                    checked={isAutoRefresh}
+                    onCheckedChange={setIsAutoRefresh}
+                    disabled={isLiveMode}
+                  />
+                </div>
+                
+                {isAutoRefresh && (
+                  <>
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium">Refresh Interval</Label>
+                      <div className="flex flex-wrap gap-1">
+                        {[
+                          { value: 5000, label: '5s' },
+                          { value: 15000, label: '15s' },
+                          { value: 30000, label: '30s' },
+                          { value: 60000, label: '1min' }
+                        ].map(interval => (
+                          <Button
+                            key={interval.value}
+                            variant={refreshInterval === interval.value ? "default" : "outline"}
+                            size="sm"
+                            onClick={() => setRefreshInterval(interval.value)}
+                            className="text-xs"
+                          >
+                            {interval.label}
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
+                    
+                    {countdown > 0 && (
+                      <div className="text-center">
+                        <div className="text-xs text-muted-foreground">
+                          Next refresh in
+                        </div>
+                        <div className="text-lg font-mono font-bold text-blue-600">
+                          {countdown}s
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+                
+                {isLiveMode && (
+                  <div className="text-xs text-muted-foreground text-center">
+                    Auto refresh disabled in Live mode
+                  </div>
+                )}
               </div>
             </CardContent>
           </Card>
